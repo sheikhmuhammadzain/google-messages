@@ -22,55 +22,164 @@ export const APP_CONFIG = {
   PAGINATION_LIMIT: 50
 };
 
-// Colors matching Google Messages exactly
+// Professional color scheme with enhanced visual hierarchy
 export const COLORS = {
-  // Primary colors
-  primary: '#1A73E8', // Google Blue
-  primaryDark: '#1557B0',
-  primaryLight: '#E8F0FE',
-  accent: '#34A853', // Google Green
+  // Primary colors - Modern blue palette
+  primary: '#0B57D0', // Google Blue (updated)
+  primaryDark: '#001D35',
+  primaryLight: '#D3E3FD',
+  primaryContainer: '#E8F0FE',
+  accent: '#00897B', // Teal accent
+  accentLight: '#E0F2F1',
   
-  // Background colors
+  // Background colors - Subtle gradients
   background: '#FFFFFF',
   backgroundGray: '#F8F9FA',
+  backgroundSecondary: '#F1F3F4',
   surface: '#FFFFFF',
-  surfaceVariant: '#F1F3F4',
+  surfaceVariant: '#EEF0F3',
+  surfaceElevated: '#FFFFFF',
   
   // Status colors
-  error: '#EA4335',
-  success: '#34A853',
-  warning: '#FBBC04',
+  error: '#D32F2F',
+  errorLight: '#FFEBEE',
+  success: '#2E7D32',
+  successLight: '#E8F5E9',
+  warning: '#F57C00',
+  warningLight: '#FFF3E0',
+  info: '#0288D1',
+  infoLight: '#E1F5FE',
   
-  // Text colors
-  text: '#202124',
-  textPrimary: '#202124',
-  textSecondary: '#5F6368',
-  textTertiary: '#80868B',
-  textDisabled: '#DADCE0',
+  // Text colors - Better contrast
+  text: '#1C1B1F',
+  textPrimary: '#1C1B1F',
+  textSecondary: '#49454F',
+  textTertiary: '#73767E',
+  textDisabled: '#C4C7C5',
+  textHint: '#9AA0A6',
+  textInverse: '#FFFFFF',
   
-  // Border colors
-  border: '#E8EAED',
-  divider: '#DADCE0',
+  // Border and divider colors
+  border: '#E3E1E6',
+  borderLight: '#F4F3F5',
+  divider: '#E8EAED',
+  outline: '#79747E',
   
-  // Message bubble colors
-  sentBubble: '#1A73E8',
+  // Message bubble colors - Modern design
+  sentBubble: '#0B57D0',
+  sentBubbleGradient: ['#0B57D0', '#1967D2'],
   sentText: '#FFFFFF',
-  receivedBubble: '#F1F3F4',
-  receivedText: '#202124',
+  receivedBubble: '#E8EAF6',
+  receivedText: '#1C1B1F',
   
-  // Avatar colors (Google Material Design palette)
+  // Avatar colors - Material You palette
   avatarColors: [
-    '#1A73E8', // Blue
-    '#34A853', // Green
-    '#EA4335', // Red
-    '#FBBC04', // Yellow
-    '#9334E6', // Purple
-    '#00BCD4', // Cyan
-    '#FF6F00', // Orange
-    '#E91E63', // Pink
+    '#0B57D0', // Blue
+    '#00897B', // Teal  
+    '#C62828', // Red
+    '#F57C00', // Orange
+    '#6A1B9A', // Purple
+    '#00ACC1', // Cyan
+    '#EF6C00', // Deep Orange
+    '#AD1457', // Pink
   ],
   
   // Dual SIM colors
-  simSlot1: '#1A73E8', // Blue for SIM 1
-  simSlot2: '#34A853', // Green for SIM 2
+  simSlot1: '#0B57D0', // Blue for SIM 1
+  simSlot2: '#00897B', // Teal for SIM 2
+  
+  // Additional UI colors
+  badge: '#D32F2F',
+  badgeText: '#FFFFFF',
+  overlay: 'rgba(0, 0, 0, 0.5)',
+  overlayLight: 'rgba(0, 0, 0, 0.3)',
+  shadow: 'rgba(0, 0, 0, 0.1)',
+  shadowDark: 'rgba(0, 0, 0, 0.2)',
+};
+
+// Typography system
+export const TYPOGRAPHY = {
+  // Display
+  displayLarge: { fontSize: 57, lineHeight: 64, fontWeight: '400' },
+  displayMedium: { fontSize: 45, lineHeight: 52, fontWeight: '400' },
+  displaySmall: { fontSize: 36, lineHeight: 44, fontWeight: '400' },
+  
+  // Headline
+  headlineLarge: { fontSize: 32, lineHeight: 40, fontWeight: '400' },
+  headlineMedium: { fontSize: 28, lineHeight: 36, fontWeight: '400' },
+  headlineSmall: { fontSize: 24, lineHeight: 32, fontWeight: '400' },
+  
+  // Title
+  titleLarge: { fontSize: 22, lineHeight: 28, fontWeight: '500' },
+  titleMedium: { fontSize: 16, lineHeight: 24, fontWeight: '500' },
+  titleSmall: { fontSize: 14, lineHeight: 20, fontWeight: '500' },
+  
+  // Body
+  bodyLarge: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  bodyMedium: { fontSize: 14, lineHeight: 20, fontWeight: '400' },
+  bodySmall: { fontSize: 12, lineHeight: 16, fontWeight: '400' },
+  
+  // Label
+  labelLarge: { fontSize: 14, lineHeight: 20, fontWeight: '500' },
+  labelMedium: { fontSize: 12, lineHeight: 16, fontWeight: '500' },
+  labelSmall: { fontSize: 11, lineHeight: 16, fontWeight: '500' },
+};
+
+// Spacing system
+export const SPACING = {
+  xs: 4,
+  sm: 8,
+  md: 16,
+  lg: 24,
+  xl: 32,
+  xxl: 48,
+};
+
+// Border radius system
+export const RADIUS = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  full: 9999,
+};
+
+// Elevation/Shadow system
+export const ELEVATION = {
+  level0: {
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  level1: {
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.0,
+    elevation: 1,
+  },
+  level2: {
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.20,
+    shadowRadius: 1.41,
+    elevation: 2,
+  },
+  level3: {
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.22,
+    shadowRadius: 2.22,
+    elevation: 3,
+  },
+  level4: {
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.23,
+    shadowRadius: 2.62,
+    elevation: 4,
+  },
 };

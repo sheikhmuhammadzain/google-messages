@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform, Image } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, Image, Animated } from 'react-native';
 import { Text } from 'react-native-paper';
 import { Conversation } from '../types';
 import { formatConversationTime } from '../utils/dateUtils';
-import { COLORS } from '../config/constants';
+import { COLORS, SPACING, RADIUS, ELEVATION, TYPOGRAPHY } from '../config/constants';
 import contactsService from '../services/contactsService';
 
 interface Props {
@@ -15,6 +15,7 @@ export default function ConversationItem({ conversation, onPress }: Props) {
   const { phoneNumber, contactName, lastMessage, lastMessageTime, unreadCount } = conversation;
   const [displayName, setDisplayName] = useState(contactName || phoneNumber);
   const [contactPhoto, setContactPhoto] = useState<string | null>(null);
+  const [scaleAnim] = useState(new Animated.Value(1));
   
   useEffect(() => {
     loadContactInfo();
@@ -47,13 +48,32 @@ export default function ConversationItem({ conversation, onPress }: Props) {
   };
   
   const avatarColor = getAvatarColor(phoneNumber);
+  
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.98,
+      useNativeDriver: true,
+    }).start();
+  };
+  
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      friction: 3,
+      tension: 40,
+      useNativeDriver: true,
+    }).start();
+  };
 
   return (
-    <TouchableOpacity 
-      style={[styles.container, unreadCount > 0 && styles.unreadContainer]} 
-      onPress={() => onPress(conversation)}
-      activeOpacity={0.7}
-    >
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity 
+        style={[styles.container, unreadCount > 0 && styles.unreadContainer]} 
+        onPress={() => onPress(conversation)}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        activeOpacity={1}
+      >
       <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
         {contactPhoto ? (
           <Image source={{ uri: contactPhoto }} style={styles.avatarImage} />
@@ -86,9 +106,16 @@ export default function ConversationItem({ conversation, onPress }: Props) {
       </View>
       
       {unreadCount > 0 && (
-        <View style={styles.unreadDot} />
+        <View style={styles.badgeContainer}>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </Text>
+          </View>
+        </View>
       )}
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -96,83 +123,97 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.md,
     backgroundColor: COLORS.background,
-    minHeight: 72,
+    minHeight: 80,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
   },
   unreadContainer: {
-    backgroundColor: COLORS.backgroundGray,
+    backgroundColor: COLORS.primaryContainer,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 52,
+    height: 52,
+    borderRadius: RADIUS.full,
     justifyContent: 'center',
     alignItems: 'center',
+    ...ELEVATION.level1,
   },
   avatarText: {
-    color: COLORS.background,
-    fontSize: 16,
-    fontWeight: '600',
+    color: COLORS.textInverse,
+    ...TYPOGRAPHY.titleMedium,
+    fontWeight: '600' as any,
   },
   avatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 52,
+    height: 52,
+    borderRadius: RADIUS.full,
   },
   content: {
     flex: 1,
-    marginLeft: 16,
+    marginLeft: SPACING.md,
     justifyContent: 'center',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 2,
+    marginBottom: SPACING.xs,
   },
   name: {
-    fontSize: 16,
-    fontWeight: '400',
+    ...TYPOGRAPHY.bodyLarge,
+    fontWeight: '500' as any,
     color: COLORS.textPrimary,
     flex: 1,
-    letterSpacing: 0.1,
+    letterSpacing: 0.15,
   },
   unreadName: {
-    fontWeight: '600',
+    fontWeight: '600' as any,
     color: COLORS.textPrimary,
   },
   time: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginLeft: 12,
-    fontWeight: '400',
+    ...TYPOGRAPHY.labelSmall,
+    color: COLORS.textTertiary,
+    marginLeft: SPACING.sm,
   },
   unreadTime: {
     color: COLORS.primary,
-    fontWeight: '600',
+    fontWeight: '600' as any,
   },
   messageRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 2,
   },
   message: {
-    fontSize: 14,
+    ...TYPOGRAPHY.bodyMedium,
     color: COLORS.textSecondary,
     flex: 1,
     lineHeight: 20,
   },
   unreadMessage: {
     color: COLORS.textPrimary,
-    fontWeight: '500',
+    fontWeight: '500' as any,
   },
-  unreadDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: COLORS.primary,
-    marginLeft: 8,
+  badgeContainer: {
+    alignSelf: 'flex-start',
+    marginLeft: SPACING.sm,
+    marginTop: SPACING.xs,
+  },
+  badge: {
+    minWidth: 24,
+    height: 24,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.badge,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.xs,
+    ...ELEVATION.level2,
+  },
+  badgeText: {
+    ...TYPOGRAPHY.labelSmall,
+    color: COLORS.badgeText,
+    fontWeight: '700' as any,
   },
 });
