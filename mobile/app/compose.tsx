@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, FlatList, StyleSheet, TouchableOpacity, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, FlatList, StyleSheet, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
 import { TextInput, Text, ActivityIndicator, IconButton, Divider, Button } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import SimSelector from '../src/components/SimSelector';
@@ -29,10 +29,25 @@ export default function ComposeScreen() {
   const [selectedSim, setSelectedSim] = useState<SimCard | null>(null);
   const [showSimSelector, setShowSimSelector] = useState(false);
   const [isDualSim, setIsDualSim] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   useEffect(() => {
     loadContacts();
     loadSimInfo();
+
+    // Keyboard event listeners
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -159,13 +174,17 @@ export default function ComposeScreen() {
       
       await smsService.sendSMS(recipient, message, undefined, subscriptionId);
       
+      // Clear sending state after successful send
+      setIsSending(false);
+      
       // Navigate to the conversation
       router.replace(`/chat/${recipient}`);
     } catch (error: any) {
       console.error('Error sending message:', error);
       const errorMessage = error?.message || 'Failed to send message. Please try again.';
       alert(errorMessage);
-    } finally {
+      
+      // Clear sending state on error
       setIsSending(false);
     }
   };
@@ -259,7 +278,7 @@ export default function ComposeScreen() {
         />
       </View>
 
-      <View style={styles.sendButton}>
+      <View style={[styles.sendButton, { bottom: keyboardHeight > 0 ? keyboardHeight + 8 : 8 }]}>
         <IconButton
           icon="send"
           size={28}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
 import { TextInput, IconButton, ActivityIndicator } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import MessageBubble from '../../src/components/MessageBubble';
@@ -26,11 +26,12 @@ export default function ChatScreen() {
   const [selectedSim, setSelectedSim] = useState<SimCard | null>(null);
   const [showSimSelector, setShowSimSelector] = useState(false);
   const [isDualSim, setIsDualSim] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const flatListRef = useRef<FlatList>(null);
 
   // Handle incoming SMS messages in real-time
   useSmsListener({
-    onSmsReceived: useCallback((event) => {
+    onSmsReceived: useCallback((event: any) => {
       // Only process messages from this conversation
       if (event.phoneNumber === phoneNumber) {
         console.log('New message received for this chat:', event.body);
@@ -64,8 +65,18 @@ export default function ChatScreen() {
     // Mark conversation as read when opening
     markConversationAsRead();
 
+    // Keyboard event listeners
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
     return () => {
-      // Cleanup
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
     };
   }, [phoneNumber]);
 
@@ -75,7 +86,7 @@ export default function ChatScreen() {
       console.log('Conversation marked as read');
       // Notify web client if connected
       if (socketService.connected) {
-        socketService.emit('conversation:read', { phoneNumber });
+        socketService.emitToServer('conversation:read', { phoneNumber });
       }
     } catch (error) {
       console.error('Error marking conversation as read:', error);
@@ -227,7 +238,7 @@ export default function ChatScreen() {
       setTimeout(() => {
         loadMessages();
         // Emit event so inbox can refresh
-        socketService.emit('message:sent', { phoneNumber, messageId });
+        socketService.emitToServer('message:sent', { phoneNumber, messageId });
       }, 1500);
     } catch (error: any) {
       console.error('Error sending message:', error);
@@ -246,10 +257,10 @@ export default function ChatScreen() {
 
       // Unregister listener on immediate error
       smsService.unregisterStatusListener(messageId);
-    } finally {
-      // Always clear sending state
+      
+      // Clear sending state on error
       setIsSending(false);
-      console.log('Send complete, isSending set to false');
+      console.log('Send failed, isSending set to false');
     }
   };
 
@@ -320,7 +331,8 @@ export default function ChatScreen() {
       );
 
       smsService.unregisterStatusListener(newMessageId);
-    } finally {
+      
+      // Clear sending state on error
       setIsSending(false);
     }
   };
@@ -349,11 +361,6 @@ export default function ChatScreen() {
         }} 
       />
       <View style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
-      >
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -362,9 +369,15 @@ export default function ChatScreen() {
         contentContainerStyle={styles.messagesList}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
         onLayout={() => flatListRef.current?.scrollToEnd()}
+        style={styles.messagesContainer}
       />
 
-      <View style={styles.inputContainer}>
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
+        <View style={[styles.inputContainer, { marginBottom: keyboardHeight > 0 ? 0 : 0 }]}>
         {isDualSim && selectedSim && (
           <SimIndicator 
             selectedSim={selectedSim} 
@@ -394,8 +407,7 @@ export default function ChatScreen() {
           onPress={handleSendMessage}
           style={messageText.trim() && styles.sendButtonActive}
         />
-      </View>
-      
+        </View>
       </KeyboardAvoidingView>
       
       <SimSelector
@@ -416,7 +428,14 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.backgroundGray,
   },
   keyboardView: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  messagesContainer: {
     flex: 1,
+    paddingBottom: 80, // Space for input container
   },
   loadingContainer: {
     flex: 1,

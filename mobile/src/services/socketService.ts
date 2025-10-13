@@ -189,6 +189,14 @@ class SocketService {
   }
 
   /**
+   * Emit event to server
+   */
+  emitToServer(event: string, data: any): void {
+    if (!this.socket) return;
+    this.socket.emit(event, data);
+  }
+
+  /**
    * Check if connected
    */
   get connected(): boolean {
