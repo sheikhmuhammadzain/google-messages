@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { View, FlatList, StyleSheet, RefreshControl, TouchableOpacity, NativeEventEmitter, NativeModules } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, FlatList, StyleSheet, RefreshControl, TouchableOpacity } from 'react-native';
 import { FAB, Searchbar, Text, ActivityIndicator, IconButton } from 'react-native-paper';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import ConversationItem from '../src/components/ConversationItem';
 import PermissionRequest from '../src/components/PermissionRequest';
 import { Conversation } from '../src/types';
@@ -9,6 +9,7 @@ import { COLORS } from '../src/config/constants';
 import smsService from '../src/services/smsService';
 import socketService from '../src/services/socketService';
 import contactsService from '../src/services/contactsService';
+import { useSmsListener } from '../src/hooks/useSmsListener';
 
 export default function InboxScreen() {
   const router = useRouter();
@@ -23,11 +24,29 @@ export default function InboxScreen() {
     checkPermissions();
   }, []);
 
+  // Handle incoming SMS messages in real-time
+  useSmsListener({
+    onSmsReceived: useCallback((event) => {
+      console.log('New SMS received in inbox:', event.phoneNumber);
+      // Reload conversations to show new message
+      loadConversations();
+    }, []),
+  });
+
+  // Refresh conversations when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (hasPermissions) {
+        console.log('Inbox screen focused, refreshing conversations...');
+        loadConversations();
+      }
+    }, [hasPermissions])
+  );
+
   useEffect(() => {
     if (hasPermissions) {
       loadConversations();
       setupSocketListeners();
-      setupSmsListener();
       
       // Load contacts in background
       contactsService.loadContacts().catch(err => 
@@ -76,20 +95,6 @@ export default function InboxScreen() {
     });
   };
 
-  const setupSmsListener = () => {
-    // Listen for incoming SMS from native
-    const eventEmitter = new NativeEventEmitter(NativeModules.EnhancedSmsManager);
-    
-    const subscription = eventEmitter.addListener('onSmsReceived', (data) => {
-      console.log('SMS received:', data);
-      // Reload conversations to show new message
-      loadConversations();
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  };
 
   const loadConversations = async () => {
     try {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, FlatList, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, FlatList, StyleSheet, TouchableOpacity, Image, KeyboardAvoidingView, Platform } from 'react-native';
 import { TextInput, Text, ActivityIndicator, IconButton, Divider, Button } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import SimSelector from '../src/components/SimSelector';
@@ -195,7 +195,12 @@ export default function ComposeScreen() {
   const canSend = recipient.trim().length > 0 && message.trim().length > 0 && !isSending;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.outerContainer}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
       <View style={styles.recipientContainer}>
         <Text style={styles.label}>To</Text>
         <TextInput
@@ -279,14 +284,18 @@ export default function ComposeScreen() {
         currentSimId={selectedSim?.subscriptionId}
         phoneNumber={recipient}
       />
+    </KeyboardAvoidingView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  outerContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  container: {
+    flex: 1,
   },
   recipientContainer: {
     flexDirection: 'row',

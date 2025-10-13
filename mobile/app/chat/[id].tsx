@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { TextInput, IconButton, ActivityIndicator } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -11,6 +11,7 @@ import smsService from '../../src/services/smsService';
 import socketService from '../../src/services/socketService';
 import contactsService from '../../src/services/contactsService';
 import dualSimService from '../../src/services/dualSimService';
+import { useSmsListener } from '../../src/hooks/useSmsListener';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -27,15 +28,59 @@ export default function ChatScreen() {
   const [isDualSim, setIsDualSim] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
+  // Handle incoming SMS messages in real-time
+  useSmsListener({
+    onSmsReceived: useCallback((event) => {
+      // Only process messages from this conversation
+      if (event.phoneNumber === phoneNumber) {
+        console.log('New message received for this chat:', event.body);
+        
+        // Add new message to the list immediately
+        const newMessage: Message = {
+          id: `msg_${event.timestamp}`,
+          conversationId: phoneNumber,
+          phoneNumber: event.phoneNumber,
+          body: event.body,
+          timestamp: event.timestamp,
+          type: 'received',
+          read: false,
+        };
+        
+        setMessages((prev) => [...prev, newMessage]);
+        
+        // Sync to socket
+        if (socketService.connected) {
+          socketService.syncMessages([newMessage]);
+        }
+      }
+    }, [phoneNumber]),
+  });
+
   useEffect(() => {
     loadMessages();
     loadContactInfo();
     loadSimInfo();
+    
+    // Mark conversation as read when opening
+    markConversationAsRead();
 
     return () => {
       // Cleanup
     };
   }, [phoneNumber]);
+
+  const markConversationAsRead = async () => {
+    try {
+      await smsService.markAsRead(phoneNumber);
+      console.log('Conversation marked as read');
+      // Notify web client if connected
+      if (socketService.connected) {
+        socketService.emit('conversation:read', { phoneNumber });
+      }
+    } catch (error) {
+      console.error('Error marking conversation as read:', error);
+    }
+  };
 
   const loadContactInfo = async () => {
     try {
@@ -44,6 +89,23 @@ export default function ChatScreen() {
     } catch (error) {
       console.log('Could not load contact name:', error);
       setContactName(contactsService.formatPhoneNumber(phoneNumber));
+    }
+  };
+
+  const loadMessages = async () => {
+    try {
+      setIsLoading(true);
+      const msgs = await smsService.readConversationMessages(phoneNumber);
+      setMessages(msgs.sort((a, b) => a.timestamp - b.timestamp));
+      
+      // Sync to web
+      if (socketService.connected) {
+        socketService.syncMessages(msgs);
+      }
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -72,22 +134,6 @@ export default function ChatScreen() {
     }
   };
 
-  const loadMessages = async () => {
-    try {
-      setIsLoading(true);
-      const msgs = await smsService.readConversationMessages(phoneNumber);
-      setMessages(msgs.sort((a, b) => a.timestamp - b.timestamp));
-      
-      // Sync to web
-      if (socketService.connected) {
-        socketService.syncMessages(msgs);
-      }
-    } catch (error) {
-      console.error('Error loading messages:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleSendMessage = async () => {
     if (!messageText.trim() || isSending) return;
@@ -132,6 +178,12 @@ export default function ChatScreen() {
         alert(`Failed to send: ${error}`);
       }
 
+      // Clear sending state when message is confirmed sent or failed
+      if (status === 'sent' || status === 'delivered' || status === 'failed') {
+        setIsSending(false);
+        console.log('Message status updated, isSending set to false');
+      }
+      
       // Clean up listener after delivery or failure
       if (status === 'delivered' || status === 'failed') {
         setTimeout(() => smsService.unregisterStatusListener(messageId), 5000);
@@ -172,7 +224,11 @@ export default function ChatScreen() {
       socketService.updateMessageStatus(messageId, 'sent');
 
       // Reload to get the actual message from SMS database
-      setTimeout(() => loadMessages(), 1500);
+      setTimeout(() => {
+        loadMessages();
+        // Emit event so inbox can refresh
+        socketService.emit('message:sent', { phoneNumber, messageId });
+      }, 1500);
     } catch (error: any) {
       console.error('Error sending message:', error);
       
@@ -191,7 +247,9 @@ export default function ChatScreen() {
       // Unregister listener on immediate error
       smsService.unregisterStatusListener(messageId);
     } finally {
+      // Always clear sending state
       setIsSending(false);
+      console.log('Send complete, isSending set to false');
     }
   };
 
@@ -290,10 +348,11 @@ export default function ChatScreen() {
           headerBackTitle: 'Messages',
         }} 
       />
+      <View style={styles.container}>
       <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={100}
+        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
       >
       <FlatList
         ref={flatListRef}
@@ -337,6 +396,8 @@ export default function ChatScreen() {
         />
       </View>
       
+      </KeyboardAvoidingView>
+      
       <SimSelector
         visible={showSimSelector}
         onDismiss={() => setShowSimSelector(false)}
@@ -344,7 +405,7 @@ export default function ChatScreen() {
         currentSimId={selectedSim?.subscriptionId}
         phoneNumber={phoneNumber}
       />
-      </KeyboardAvoidingView>
+      </View>
     </>
   );
 }
@@ -353,6 +414,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.backgroundGray,
+  },
+  keyboardView: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,

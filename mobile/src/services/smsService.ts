@@ -387,12 +387,60 @@ class SMSService {
   }
 
   /**
-   * Mark message as read
+   * Mark message as read by phone number (marks entire conversation as read)
    */
-  async markAsRead(messageId: string): Promise<void> {
-    // This requires direct database access or system API
-    // For now, this is a placeholder
-    console.log('Mark as read:', messageId);
+  async markAsRead(phoneNumber: string): Promise<void> {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    try {
+      // First, get all unread messages from this phone number
+      const messages = await this.readConversationMessages(phoneNumber);
+      const unreadMessages = messages.filter(msg => !msg.read && msg.type === 'received');
+      
+      if (unreadMessages.length === 0) {
+        console.log('No unread messages to mark as read');
+        return;
+      }
+
+      // Use native module to mark messages as read if available
+      if (EnhancedSmsManager && EnhancedSmsManager.markConversationAsRead) {
+        try {
+          await EnhancedSmsManager.markConversationAsRead(phoneNumber);
+          console.log(`Marked conversation ${phoneNumber} as read`);
+          return;
+        } catch (error) {
+          console.log('EnhancedSmsManager.markConversationAsRead not available, using fallback');
+        }
+      }
+
+      // Fallback: Use SmsAndroid to mark individual messages as read
+      for (const message of unreadMessages) {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            SmsAndroid.markAsRead(
+              message.id,
+              (fail: string) => {
+                console.error(`Failed to mark message ${message.id} as read:`, fail);
+                // Don't reject, continue with other messages
+                resolve();
+              },
+              (success: string) => {
+                console.log(`Marked message ${message.id} as read:`, success);
+                resolve();
+              }
+            );
+          });
+        } catch (error) {
+          console.error(`Error marking message ${message.id} as read:`, error);
+        }
+      }
+      
+      console.log(`Marked ${unreadMessages.length} messages as read for ${phoneNumber}`);
+    } catch (error) {
+      console.error('Error marking messages as read:', error);
+    }
   }
 
   /**
