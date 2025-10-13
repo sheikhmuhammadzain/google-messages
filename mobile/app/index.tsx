@@ -10,6 +10,7 @@ import smsService from '../src/services/smsService';
 import socketService from '../src/services/socketService';
 import contactsService from '../src/services/contactsService';
 import { useSmsListener } from '../src/hooks/useSmsListener';
+import { DeviceEventEmitter } from 'react-native';
 
 export default function InboxScreen() {
   const router = useRouter();
@@ -66,6 +67,14 @@ export default function InboxScreen() {
   useEffect(() => {
     filterConversations();
   }, [searchQuery, conversations]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('conversation:read', (evt: { phoneNumber: string }) => {
+      console.log('[Inbox] conversation:read event for', evt?.phoneNumber);
+      loadConversations();
+    });
+    return () => sub.remove();
+  }, []);
 
   const checkPermissions = async () => {
     try {

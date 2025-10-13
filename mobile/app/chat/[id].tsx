@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Keyboard } from 'react-native';
+import { View, StyleSheet, Keyboard, Platform } from 'react-native';
 import { TextInput, IconButton, ActivityIndicator } from 'react-native-paper';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import MessageBubble from '../../src/components/MessageBubble';
 import SimSelector from '../../src/components/SimSelector';
@@ -28,6 +29,8 @@ export default function ChatScreen() {
   const [showSimSelector, setShowSimSelector] = useState(false);
   const [isDualSim, setIsDualSim] = useState(false);
   const flatListRef = useRef<any>(null);
+  const insets = useSafeAreaInsets();
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
 
   // Handle incoming SMS messages in real-time
   useSmsListener({
@@ -74,7 +77,23 @@ export default function ChatScreen() {
     setTimeout(() => {
       markConversationAsRead();
     }, 500);
-  }, [phoneNumber]);
+
+    // Keyboard listeners (Android) to keep input above keyboard reliably
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      const height = e.endCoordinates?.height ?? 0;
+      // Subtract bottom inset to avoid double spacing
+      const offset = Math.max(height - (insets?.bottom ?? 0), 0);
+      setKeyboardOffset(offset);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardOffset(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [phoneNumber, insets?.bottom]);
 
   const markConversationAsRead = async () => {
     try {
@@ -83,6 +102,9 @@ export default function ChatScreen() {
       // Mark messages as read in database
       await smsService.markAsRead(phoneNumber);
       console.log('[Chat] Conversation marked as read successfully');
+      
+      // Emit local event so inbox can update immediately
+      DeviceEventEmitter.emit('conversation:read', { phoneNumber });
       
       // Wait longer for Android SMS database to update and sync
       // The content provider might need time to propagate changes
@@ -109,10 +131,11 @@ export default function ChatScreen() {
     }
   };
 
-  const loadMessages = async () => {
+  // Load messages. When showLoading is false, avoid showing the full-screen loader
+  const loadMessages = async (showLoading: boolean = true) => {
     try {
-      console.log('[Chat] Loading messages for:', phoneNumber);
-      setIsLoading(true);
+      console.log('[Chat] Loading messages for:', phoneNumber, 'showLoading=', showLoading);
+      if (showLoading) setIsLoading(true);
       const msgs = await smsService.readConversationMessages(phoneNumber);
       const sortedMessages = msgs.sort((a, b) => a.timestamp - b.timestamp);
       console.log(`[Chat] Loaded ${sortedMessages.length} messages`);
@@ -131,7 +154,7 @@ export default function ChatScreen() {
     } catch (error) {
       console.error('[Chat] Error loading messages:', error);
     } finally {
-      setIsLoading(false);
+      if (showLoading) setIsLoading(false);
     }
   };
 
@@ -251,15 +274,18 @@ export default function ChatScreen() {
         )
       );
 
+      // Ensure UI doesn't stay in sending state if sent broadcast is delayed
+      setIsSending(false);
+
       // Notify socket
       socketService.updateMessageStatus(messageId, 'sent');
 
-      // Reload to get the actual message from SMS database
+      // Reload to get the actual message from SMS database (no full-screen loader)
       setTimeout(() => {
-        loadMessages();
+        loadMessages(false);
         // Emit event so inbox can refresh
         socketService.emitToServer('message:sent', { phoneNumber, messageId });
-      }, 1500);
+      }, 800);
     } catch (error: any) {
       console.error('Error sending message:', error);
       
@@ -339,7 +365,7 @@ export default function ChatScreen() {
       );
 
       socketService.updateMessageStatus(newMessageId, 'sent');
-      setTimeout(() => loadMessages(), 1500);
+      setTimeout(() => loadMessages(false), 800);
     } catch (error: any) {
       console.error('Error retrying message:', error);
       alert(error?.message || 'Retry failed. Please try again.');
@@ -429,8 +455,9 @@ export default function ChatScreen() {
           // Keyboard-aware scroll view props
           enableOnAndroid={true}
           enableAutomaticScroll={true}
-          extraScrollHeight={20}
+          extraScrollHeight={24}
           keyboardOpeningTime={0}
+          keyboardShouldPersistTaps="handled"
           // Auto-scroll behavior
           onContentSizeChange={() => {
             // Auto-scroll to bottom when new messages arrive
@@ -450,7 +477,11 @@ export default function ChatScreen() {
           }}
         />
 
-        <View style={styles.inputContainer}>
+        <View style={[
+          styles.inputContainer,
+          // Push input above keyboard on Android using measured offset
+          Platform.OS === 'android' ? { marginBottom: keyboardOffset } : { paddingBottom: insets.bottom }
+        ]}>
           {isDualSim && selectedSim && (
             <SimIndicator 
               selectedSim={selectedSim} 

@@ -135,25 +135,35 @@ class SMSService {
         (count: number, smsList: string) => {
           try {
             const messages: any[] = JSON.parse(smsList);
-            const formattedMessages: Message[] = messages.map((sms) => {
-              // Android SMS types: 1=inbox(received), 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
-              const messageType = parseInt(sms.type);
-              const isSent = messageType === 2; // TYPE_SENT
-              const isReceived = messageType === 1; // TYPE_INBOX
-              
-              console.log(`[smsService] Message ${sms._id}: type=${messageType}, address=${sms.address}`);
-              
-              return {
-                id: sms._id.toString(),
-                conversationId: sms.thread_id?.toString() || sms.address,
-                phoneNumber: sms.address,
-                body: sms.body,
-                timestamp: parseInt(sms.date),
-                type: isSent ? 'sent' : 'received',
-                status: isSent ? 'sent' : undefined,
-                read: sms.read === '1',
-              };
-            });
+            const formattedMessages: Message[] = messages
+              .map((sms) => {
+                // Android SMS types: 1=inbox(received), 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
+                const messageType = parseInt(sms.type);
+                const isSent = messageType === 2; // TYPE_SENT
+                const isReceived = messageType === 1; // TYPE_INBOX
+                
+                // Only keep received and sent messages for conversations UI
+                if (!isSent && !isReceived) {
+                  return null as any;
+                }
+                
+                // Normalize read flag (library may return number or string)
+                const readFlag = parseInt(String(sms.read), 10) === 1;
+                
+                console.log(`[smsService] Message ${sms._id}: type=${messageType}, address=${sms.address}, read=${sms.read}`);
+                
+                return {
+                  id: sms._id.toString(),
+                  conversationId: sms.thread_id?.toString() || sms.address,
+                  phoneNumber: sms.address,
+                  body: sms.body,
+                  timestamp: parseInt(sms.date),
+                  type: isSent ? 'sent' : 'received',
+                  status: isSent ? 'sent' : undefined,
+                  read: readFlag,
+                } as Message;
+              })
+              .filter(Boolean) as Message[];
             resolve(formattedMessages);
           } catch (error) {
             reject(error);
@@ -196,23 +206,32 @@ class SMSService {
         (count: number, smsList: string) => {
           try {
             const messages: any[] = JSON.parse(smsList);
-            const formattedMessages: Message[] = messages.map((sms) => {
-              // Android SMS types: 1=inbox(received), 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
-              const messageType = parseInt(sms.type);
-              const isSent = messageType === 2; // TYPE_SENT
-              const isReceived = messageType === 1; // TYPE_INBOX
-              
-              return {
-                id: sms._id.toString(),
-                conversationId: sms.thread_id?.toString() || sms.address,
-                phoneNumber: sms.address,
-                body: sms.body,
-                timestamp: parseInt(sms.date),
-                type: isSent ? 'sent' : 'received',
-                status: isSent ? 'sent' : undefined,
-                read: sms.read === '1',
-              };
-            });
+            const formattedMessages: Message[] = messages
+              .map((sms) => {
+                // Android SMS types: 1=inbox(received), 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
+                const messageType = parseInt(sms.type);
+                const isSent = messageType === 2; // TYPE_SENT
+                const isReceived = messageType === 1; // TYPE_INBOX
+                
+                if (!isSent && !isReceived) {
+                  return null as any;
+                }
+                
+                // Normalize read flag (number or string)
+                const readFlag = parseInt(String(sms.read), 10) === 1;
+                
+                return {
+                  id: sms._id.toString(),
+                  conversationId: sms.thread_id?.toString() || sms.address,
+                  phoneNumber: sms.address,
+                  body: sms.body,
+                  timestamp: parseInt(sms.date),
+                  type: isSent ? 'sent' : 'received',
+                  status: isSent ? 'sent' : undefined,
+                  read: readFlag,
+                } as Message;
+              })
+              .filter(Boolean) as Message[];
             resolve(formattedMessages);
           } catch (error) {
             reject(error);
