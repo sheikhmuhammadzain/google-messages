@@ -108,14 +108,38 @@ export default function ComposeScreen() {
       return;
     }
 
-    const query = recipient.toLowerCase();
-    const filtered = contacts.filter(
-      (contact) =>
-        contact.name.toLowerCase().includes(query) ||
-        contact.phoneNumber.includes(query)
-    );
-    setFilteredContacts(filtered.slice(0, 5));
-    setShowSuggestions(filtered.length > 0 && recipient.length > 0);
+    const query = recipient.toLowerCase().trim();
+    
+    // Filter contacts by name or phone number
+    const filtered = contacts.filter((contact) => {
+      const nameMatch = contact.name.toLowerCase().includes(query);
+      const phoneMatch = contact.phoneNumber.replace(/[\s-()]/g, '').includes(query.replace(/[\s-()]/g, ''));
+      return nameMatch || phoneMatch;
+    });
+    
+    // Sort: exact matches first, then starts with, then contains
+    const sorted = filtered.sort((a, b) => {
+      const aNameLower = a.name.toLowerCase();
+      const bNameLower = b.name.toLowerCase();
+      
+      // Exact match
+      if (aNameLower === query) return -1;
+      if (bNameLower === query) return 1;
+      
+      // Starts with
+      const aStarts = aNameLower.startsWith(query);
+      const bStarts = bNameLower.startsWith(query);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      
+      // Alphabetical
+      return aNameLower.localeCompare(bNameLower);
+    });
+    
+    setFilteredContacts(sorted.slice(0, 8)); // Show up to 8 suggestions
+    setShowSuggestions(sorted.length > 0 && recipient.length > 0);
+    
+    console.log(`[Compose] Filtered ${sorted.length} contacts for query: "${query}"`);
   };
 
   const handleContactSelect = (contact: Contact) => {
