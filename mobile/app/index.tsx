@@ -34,11 +34,15 @@ export default function InboxScreen() {
   });
 
   // Refresh conversations when screen comes into focus
+  // This ensures unread badges update after marking messages as read in chat
   useFocusEffect(
     useCallback(() => {
       if (hasPermissions) {
-        console.log('Inbox screen focused, refreshing conversations...');
-        loadConversations();
+        console.log('[Inbox] Screen focused, refreshing conversations to update badges...');
+        // Small delay to ensure any mark-as-read operations are complete
+        setTimeout(() => {
+          loadConversations();
+        }, 200);
       }
     }, [hasPermissions])
   );

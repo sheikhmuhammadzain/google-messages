@@ -30,6 +30,7 @@
     "react-native": "0.81.4",
     "react-native-contacts": "^7.0.8",
     "react-native-get-sms-android": "github:JPCOM-Tech/react-native-get-sms-android",
+    "react-native-keyboard-aware-scroll-view": "^0.9.5",
     "react-native-paper": "^5.12.3",
     "react-native-qrcode-svg": "^6.3.0",
     "react-native-safe-area-context": "~5.6.0",

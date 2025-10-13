@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
+import { View, StyleSheet, Keyboard } from 'react-native';
 import { TextInput, IconButton, ActivityIndicator } from 'react-native-paper';
+import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import MessageBubble from '../../src/components/MessageBubble';
 import SimSelector from '../../src/components/SimSelector';
@@ -26,8 +27,7 @@ export default function ChatScreen() {
   const [selectedSim, setSelectedSim] = useState<SimCard | null>(null);
   const [showSimSelector, setShowSimSelector] = useState(false);
   const [isDualSim, setIsDualSim] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<any>(null);
 
   // Handle incoming SMS messages in real-time
   useSmsListener({
@@ -51,7 +51,7 @@ export default function ChatScreen() {
         
         // Scroll to bottom to show the new message
         setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
+          flatListRef.current?.scrollToEnd?.({ animated: true });
         }, 100);
         
         // Sync to socket
@@ -74,20 +74,6 @@ export default function ChatScreen() {
     setTimeout(() => {
       markConversationAsRead();
     }, 500);
-
-    // Keyboard event listeners
-    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    
-    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardHeight(0);
-    });
-
-    return () => {
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
-    };
   }, [phoneNumber]);
 
   const markConversationAsRead = async () => {
@@ -98,17 +84,16 @@ export default function ChatScreen() {
       await smsService.markAsRead(phoneNumber);
       console.log('[Chat] Conversation marked as read successfully');
       
-      // Wait a bit for database to update
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Wait longer for Android SMS database to update and sync
+      // The content provider might need time to propagate changes
+      await new Promise(resolve => setTimeout(resolve, 800));
       
       // Notify web client if connected
       if (socketService.connected) {
-        socketService.emit('conversation:read', { phoneNumber });
+        socketService.emitToServer('conversation:read', { phoneNumber });
       }
       
-      // Force inbox to refresh by emitting event
-      // This will trigger useFocusEffect when user goes back
-      console.log('[Chat] Triggering inbox refresh');
+      console.log('[Chat] Mark as read complete - inbox will refresh on focus');
     } catch (error) {
       console.error('[Chat] Error marking conversation as read:', error);
     }
@@ -135,9 +120,9 @@ export default function ChatScreen() {
       
       // Scroll to bottom after messages are loaded
       setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: false });
+        flatListRef.current?.scrollToEnd?.({ animated: false });
         console.log('[Chat] Scrolled to bottom after loading');
-      }, 100);
+      }, 150);
       
       // Sync to web
       if (socketService.connected) {
@@ -199,8 +184,8 @@ export default function ChatScreen() {
     
     // Scroll to bottom to show the new message
     setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+      flatListRef.current?.scrollToEnd?.({ animated: true });
+    }, 150);
 
     // Register status listener for this message
     smsService.registerStatusListener(messageId, (status, error) => {
@@ -372,10 +357,49 @@ export default function ChatScreen() {
     }
   };
 
+  const handleDeleteMessage = async (message: Message) => {
+    try {
+      console.log('[Chat] Deleting message:', message.id);
+      
+      // Optimistically remove from UI
+      setMessages((prev) => prev.filter((msg) => msg.id !== message.id));
+      
+      // Delete from Android SMS database
+      await smsService.deleteSms(message.id);
+      console.log('[Chat] Message deleted successfully');
+      
+      // Notify web client if connected
+      if (socketService.connected) {
+        socketService.emitToServer('message:deleted', { 
+          messageId: message.id, 
+          phoneNumber 
+        });
+      }
+      
+      // Optionally reload messages to ensure consistency
+      // Uncomment if you want to refresh from database after delete
+      // setTimeout(() => loadMessages(), 500);
+      
+    } catch (error: any) {
+      console.error('[Chat] Error deleting message:', error);
+      
+      // Restore message in UI if delete failed
+      setMessages((prev) => {
+        // Re-insert the message at the correct position based on timestamp
+        const updatedMessages = [...prev, message];
+        return updatedMessages.sort((a, b) => a.timestamp - b.timestamp);
+      });
+      
+      // Show error to user
+      alert(error?.message || 'Failed to delete message. Please try again.');
+    }
+  };
+
   const renderMessage = ({ item }: { item: Message }) => (
     <MessageBubble 
       message={item} 
       onRetry={item.status === 'failed' ? () => handleRetryMessage(item) : undefined}
+      onDelete={() => handleDeleteMessage(item)}
     />
   );
 
@@ -395,25 +419,32 @@ export default function ChatScreen() {
           headerBackTitle: 'Messages',
         }} 
       />
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
-      >
-        <FlatList
+      <View style={styles.container}>
+        <KeyboardAwareFlatList
           ref={flatListRef}
           data={messages}
           renderItem={renderMessage}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messagesList}
+          // Keyboard-aware scroll view props
+          enableOnAndroid={true}
+          enableAutomaticScroll={true}
+          extraScrollHeight={20}
+          keyboardOpeningTime={0}
+          // Auto-scroll behavior
           onContentSizeChange={() => {
             // Auto-scroll to bottom when new messages arrive
-            flatListRef.current?.scrollToEnd({ animated: true });
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd?.({ animated: true });
+            }, 100);
           }}
           onLayout={() => {
             // Scroll to bottom on initial layout
-            flatListRef.current?.scrollToEnd({ animated: false });
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd?.({ animated: false });
+            }, 100);
           }}
+          // Keep scroll position stable
           maintainVisibleContentPosition={{
             minIndexForVisible: 0,
           }}
@@ -439,6 +470,15 @@ export default function ChatScreen() {
               mode="flat"
               underlineColor="transparent"
               activeUnderlineColor="transparent"
+              cursorColor={COLORS.primary}
+              selectionColor={COLORS.primaryLight}
+              textColor={COLORS.textPrimary}
+              onFocus={() => {
+                // Scroll to bottom when input is focused
+                setTimeout(() => {
+                  flatListRef.current?.scrollToEnd?.({ animated: true });
+                }, 300);
+              }}
             />
           </View>
           <IconButton
@@ -450,7 +490,7 @@ export default function ChatScreen() {
             style={messageText.trim() && styles.sendButtonActive}
           />
         </View>
-      </KeyboardAvoidingView>
+      </View>
       
       <SimSelector
         visible={showSimSelector}

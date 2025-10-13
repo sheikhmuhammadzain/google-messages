@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Text, IconButton } from 'react-native-paper';
 import { Message } from '../types';
 import { formatChatTime } from '../utils/dateUtils';
@@ -9,14 +9,41 @@ interface Props {
   message: Message;
   showTimestamp?: boolean;
   onRetry?: () => void;
+  onDelete?: () => void;
 }
 
-export default function MessageBubble({ message, showTimestamp = true, onRetry }: Props) {
+export default function MessageBubble({ message, showTimestamp = true, onRetry, onDelete }: Props) {
   const isSent = message.type === 'sent';
   const isFailed = message.status === 'failed';
 
+  const handleLongPress = () => {
+    if (onDelete) {
+      Alert.alert(
+        'Delete Message',
+        'Are you sure you want to delete this message?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: onDelete,
+          },
+        ],
+        { cancelable: true }
+      );
+    }
+  };
+
   return (
-    <View style={[styles.container, isSent ? styles.sentContainer : styles.receivedContainer]}>
+    <TouchableOpacity 
+      style={[styles.container, isSent ? styles.sentContainer : styles.receivedContainer]}
+      onLongPress={handleLongPress}
+      activeOpacity={0.8}
+      delayLongPress={500}
+    >
       <View style={[styles.bubble, isSent ? styles.sentBubble : styles.receivedBubble, isFailed && styles.failedBubble]}>
         <Text style={[styles.messageText, isSent ? styles.sentText : styles.receivedText]}>
           {message.body}
@@ -47,7 +74,7 @@ export default function MessageBubble({ message, showTimestamp = true, onRetry }
           )}
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 

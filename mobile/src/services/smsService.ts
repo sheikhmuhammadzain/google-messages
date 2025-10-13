@@ -103,7 +103,7 @@ class SMSService {
   }
 
   /**
-   * Read all SMS messages
+   * Read all SMS messages (both inbox and sent)
    */
   async readAllMessages(): Promise<Message[]> {
     return new Promise(async (resolve, reject) => {
@@ -119,8 +119,9 @@ class SMSService {
         return;
       }
 
+      // Read ALL messages (inbox + sent) by using empty box filter
       const filter = {
-        box: 'inbox', // 'inbox' (1), 'sent' (2), 'draft' (3), 'outbox' (4), 'failed' (5), 'queued' (6)
+        box: '', // Empty = all boxes (inbox + sent + drafts, etc.)
         indexFrom: 0,
         maxCount: 1000,
       };
@@ -230,15 +231,19 @@ class SMSService {
       const conversationsMap = new Map<string, Conversation>();
 
       messages.forEach((message) => {
-        const { phoneNumber, body, timestamp, read } = message;
+        const { phoneNumber, body, timestamp, read, type } = message;
 
         if (!conversationsMap.has(phoneNumber)) {
+          // Create new conversation
+          // Only count unread RECEIVED messages (not sent messages)
+          const initialUnread = (!read && type === 'received') ? 1 : 0;
+          
           conversationsMap.set(phoneNumber, {
             id: phoneNumber,
             phoneNumber,
             lastMessage: body,
             lastMessageTime: timestamp,
-            unreadCount: read ? 0 : 1,
+            unreadCount: initialUnread,
           });
         } else {
           const conv = conversationsMap.get(phoneNumber)!;
@@ -249,8 +254,9 @@ class SMSService {
             conv.lastMessageTime = timestamp;
           }
           
-          // Increment unread count
-          if (!read) {
+          // Increment unread count ONLY for unread RECEIVED messages
+          // Sent messages are always "read" and should not be counted
+          if (!read && type === 'received') {
             conv.unreadCount++;
           }
         }
@@ -474,27 +480,44 @@ class SMSService {
   }
 
   /**
-   * Delete message
+   * Delete a specific SMS message by ID
    */
-  async deleteMessage(messageId: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (Platform.OS !== 'android') {
-        reject(new Error('Delete is only supported on Android'));
+  async deleteSms(messageId: string): Promise<void> {
+    if (Platform.OS !== 'android') {
+      throw new Error('Delete is only supported on Android');
+    }
+
+    console.log(`[smsService] Attempting to delete message with ID: ${messageId}`);
+
+    try {
+      // Try using EnhancedSmsManager native method first (more reliable)
+      if (EnhancedSmsManager && EnhancedSmsManager.deleteSmsMessage) {
+        console.log('[smsService] Using EnhancedSmsManager.deleteSmsMessage');
+        await EnhancedSmsManager.deleteSmsMessage(messageId);
+        console.log(`[smsService] ✅ Message ${messageId} deleted successfully via native method`);
         return;
+      } else {
+        console.log('[smsService] EnhancedSmsManager not available, using fallback');
       }
 
-      SmsAndroid.delete(
-        messageId,
-        (fail: string) => {
-          console.error('Failed to delete message:', fail);
-          reject(new Error(fail));
-        },
-        (success: string) => {
-          console.log('Message deleted:', success);
-          resolve();
-        }
-      );
-    });
+      // Fallback to SmsAndroid if native method not available
+      await new Promise<void>((resolve, reject) => {
+        SmsAndroid.delete(
+          messageId,
+          (fail: string) => {
+            console.error(`[smsService] Failed to delete message via SmsAndroid:`, fail);
+            reject(new Error(fail));
+          },
+          (success: string) => {
+            console.log(`[smsService] ✅ Message ${messageId} deleted via SmsAndroid:`, success);
+            resolve();
+          }
+        );
+      });
+    } catch (error: any) {
+      console.error('[smsService] ❌ Error deleting message:', error);
+      throw new Error(error.message || 'Failed to delete message');
+    }
   }
 }
 

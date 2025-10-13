@@ -234,12 +234,16 @@ export default function ComposeScreen() {
         <TextInput
           style={styles.recipientInput}
           placeholder="Phone number or contact name"
+          placeholderTextColor={COLORS.textSecondary}
           value={recipient}
           onChangeText={setRecipient}
           mode="flat"
           dense
           underlineColor="transparent"
           activeUnderlineColor="transparent"
+          cursorColor={COLORS.primary}
+          selectionColor={COLORS.primaryLight}
+          textColor={COLORS.textPrimary}
         />
         <IconButton
           icon="account-circle"
@@ -277,6 +281,7 @@ export default function ComposeScreen() {
         <TextInput
           style={styles.messageInput}
           placeholder="Message"
+          placeholderTextColor={COLORS.textSecondary}
           value={message}
           onChangeText={setMessage}
           multiline
@@ -284,6 +289,9 @@ export default function ComposeScreen() {
           mode="flat"
           underlineColor="transparent"
           activeUnderlineColor="transparent"
+          cursorColor={COLORS.primary}
+          selectionColor={COLORS.primaryLight}
+          textColor={COLORS.textPrimary}
         />
       </View>
 
