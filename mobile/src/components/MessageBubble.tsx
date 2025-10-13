@@ -54,6 +54,7 @@ export default function MessageBubble({ message, showTimestamp = true, onRetry }
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
+    width: '100%',
     marginVertical: 2,
     paddingHorizontal: 8,
   },

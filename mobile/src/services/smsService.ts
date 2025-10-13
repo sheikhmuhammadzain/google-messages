@@ -134,16 +134,25 @@ class SMSService {
         (count: number, smsList: string) => {
           try {
             const messages: any[] = JSON.parse(smsList);
-            const formattedMessages: Message[] = messages.map((sms) => ({
-              id: sms._id.toString(),
-              conversationId: sms.thread_id?.toString() || sms.address,
-              phoneNumber: sms.address,
-              body: sms.body,
-              timestamp: parseInt(sms.date),
-              type: sms.type === '1' ? 'received' : 'sent',
-              status: sms.type === '2' ? 'sent' : undefined,
-              read: sms.read === '1',
-            }));
+            const formattedMessages: Message[] = messages.map((sms) => {
+              // Android SMS types: 1=inbox(received), 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
+              const messageType = parseInt(sms.type);
+              const isSent = messageType === 2; // TYPE_SENT
+              const isReceived = messageType === 1; // TYPE_INBOX
+              
+              console.log(`[smsService] Message ${sms._id}: type=${messageType}, address=${sms.address}`);
+              
+              return {
+                id: sms._id.toString(),
+                conversationId: sms.thread_id?.toString() || sms.address,
+                phoneNumber: sms.address,
+                body: sms.body,
+                timestamp: parseInt(sms.date),
+                type: isSent ? 'sent' : 'received',
+                status: isSent ? 'sent' : undefined,
+                read: sms.read === '1',
+              };
+            });
             resolve(formattedMessages);
           } catch (error) {
             reject(error);
@@ -186,16 +195,23 @@ class SMSService {
         (count: number, smsList: string) => {
           try {
             const messages: any[] = JSON.parse(smsList);
-            const formattedMessages: Message[] = messages.map((sms) => ({
-              id: sms._id.toString(),
-              conversationId: sms.thread_id?.toString() || sms.address,
-              phoneNumber: sms.address,
-              body: sms.body,
-              timestamp: parseInt(sms.date),
-              type: sms.type === '1' ? 'received' : 'sent',
-              status: sms.type === '2' ? 'sent' : undefined,
-              read: sms.read === '1',
-            }));
+            const formattedMessages: Message[] = messages.map((sms) => {
+              // Android SMS types: 1=inbox(received), 2=sent, 3=draft, 4=outbox, 5=failed, 6=queued
+              const messageType = parseInt(sms.type);
+              const isSent = messageType === 2; // TYPE_SENT
+              const isReceived = messageType === 1; // TYPE_INBOX
+              
+              return {
+                id: sms._id.toString(),
+                conversationId: sms.thread_id?.toString() || sms.address,
+                phoneNumber: sms.address,
+                body: sms.body,
+                timestamp: parseInt(sms.date),
+                type: isSent ? 'sent' : 'received',
+                status: isSent ? 'sent' : undefined,
+                read: sms.read === '1',
+              };
+            });
             resolve(formattedMessages);
           } catch (error) {
             reject(error);
@@ -391,55 +407,69 @@ class SMSService {
    */
   async markAsRead(phoneNumber: string): Promise<void> {
     if (Platform.OS !== 'android') {
+      console.log('[smsService] markAsRead: Not Android, skipping');
       return;
     }
 
     try {
+      console.log(`[smsService] markAsRead: Starting for ${phoneNumber}`);
+      
       // First, get all unread messages from this phone number
       const messages = await this.readConversationMessages(phoneNumber);
+      console.log(`[smsService] Found ${messages.length} total messages`);
+      
       const unreadMessages = messages.filter(msg => !msg.read && msg.type === 'received');
+      console.log(`[smsService] Found ${unreadMessages.length} unread messages`);
       
       if (unreadMessages.length === 0) {
-        console.log('No unread messages to mark as read');
+        console.log('[smsService] No unread messages to mark as read');
         return;
       }
 
       // Use native module to mark messages as read if available
       if (EnhancedSmsManager && EnhancedSmsManager.markConversationAsRead) {
         try {
-          await EnhancedSmsManager.markConversationAsRead(phoneNumber);
-          console.log(`Marked conversation ${phoneNumber} as read`);
+          console.log('[smsService] Using EnhancedSmsManager.markConversationAsRead');
+          const result = await EnhancedSmsManager.markConversationAsRead(phoneNumber);
+          console.log(`[smsService] ✅ Marked ${result} messages as read via native method`);
           return;
         } catch (error) {
-          console.log('EnhancedSmsManager.markConversationAsRead not available, using fallback');
+          console.log('[smsService] EnhancedSmsManager failed, using fallback:', error);
         }
+      } else {
+        console.log('[smsService] EnhancedSmsManager not available, using fallback');
       }
 
       // Fallback: Use SmsAndroid to mark individual messages as read
+      console.log('[smsService] Using SmsAndroid fallback method');
+      let markedCount = 0;
+      
       for (const message of unreadMessages) {
         try {
           await new Promise<void>((resolve, reject) => {
             SmsAndroid.markAsRead(
               message.id,
               (fail: string) => {
-                console.error(`Failed to mark message ${message.id} as read:`, fail);
+                console.error(`[smsService] Failed to mark message ${message.id}:`, fail);
                 // Don't reject, continue with other messages
                 resolve();
               },
               (success: string) => {
-                console.log(`Marked message ${message.id} as read:`, success);
+                console.log(`[smsService] ✓ Marked message ${message.id} as read`);
+                markedCount++;
                 resolve();
               }
             );
           });
         } catch (error) {
-          console.error(`Error marking message ${message.id} as read:`, error);
+          console.error(`[smsService] Error marking message ${message.id}:`, error);
         }
       }
       
-      console.log(`Marked ${unreadMessages.length} messages as read for ${phoneNumber}`);
+      console.log(`[smsService] ✅ Successfully marked ${markedCount}/${unreadMessages.length} messages as read for ${phoneNumber}`);
     } catch (error) {
-      console.error('Error marking messages as read:', error);
+      console.error('[smsService] ❌ Error in markAsRead:', error);
+      throw error;
     }
   }
 

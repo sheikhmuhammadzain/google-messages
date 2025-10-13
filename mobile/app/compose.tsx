@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, FlatList, StyleSheet, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
+import { View, FlatList, StyleSheet, TouchableOpacity, Image, KeyboardAvoidingView, Platform } from 'react-native';
 import { TextInput, Text, ActivityIndicator, IconButton, Divider, Button } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import SimSelector from '../src/components/SimSelector';
@@ -29,25 +29,10 @@ export default function ComposeScreen() {
   const [selectedSim, setSelectedSim] = useState<SimCard | null>(null);
   const [showSimSelector, setShowSimSelector] = useState(false);
   const [isDualSim, setIsDualSim] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   useEffect(() => {
     loadContacts();
     loadSimInfo();
-
-    // Keyboard event listeners
-    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    
-    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardHeight(0);
-    });
-
-    return () => {
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
-    };
   }, []);
 
   useEffect(() => {
@@ -278,14 +263,14 @@ export default function ComposeScreen() {
         />
       </View>
 
-      <View style={[styles.sendButton, { bottom: keyboardHeight > 0 ? keyboardHeight + 8 : 8 }]}>
+      <View style={styles.sendButtonContainer}>
         <IconButton
           icon="send"
           size={28}
           iconColor={canSend ? COLORS.primary : COLORS.textDisabled}
           disabled={!canSend}
           onPress={handleSend}
-          style={canSend && styles.sendButtonActive}
+          style={[styles.sendButton, canSend && styles.sendButtonActive]}
         />
       </View>
 
@@ -399,10 +384,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlignVertical: 'top',
   },
+  sendButtonContainer: {
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: COLORS.background,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
+  },
   sendButton: {
-    position: 'absolute',
-    right: 8,
-    bottom: 8,
+    margin: 0,
   },
   sendButtonActive: {
     backgroundColor: COLORS.primaryLight,

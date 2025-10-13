@@ -98,8 +98,18 @@ export default function InboxScreen() {
 
   const loadConversations = async () => {
     try {
+      console.log('[Inbox] Loading conversations...');
       setIsLoading(true);
       const convs = await smsService.getConversations();
+      console.log(`[Inbox] Loaded ${convs.length} conversations`);
+      
+      // Log unread counts for debugging
+      const unreadConvs = convs.filter(c => c.unreadCount > 0);
+      console.log(`[Inbox] ${unreadConvs.length} conversations with unread messages:`);
+      unreadConvs.forEach(c => {
+        console.log(`  - ${c.phoneNumber}: ${c.unreadCount} unread`);
+      });
+      
       setConversations(convs);
       
       // Sync to web if connected
@@ -107,7 +117,7 @@ export default function InboxScreen() {
         socketService.syncConversations(convs);
       }
     } catch (error) {
-      console.error('Error loading conversations:', error);
+      console.error('[Inbox] Error loading conversations:', error);
       // Check if it's a permission error
       if (error instanceof Error && error.message.includes('permission')) {
         setHasPermissions(false);

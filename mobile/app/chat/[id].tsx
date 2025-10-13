@@ -49,6 +49,11 @@ export default function ChatScreen() {
         
         setMessages((prev) => [...prev, newMessage]);
         
+        // Scroll to bottom to show the new message
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+        
         // Sync to socket
         if (socketService.connected) {
           socketService.syncMessages([newMessage]);
@@ -58,12 +63,17 @@ export default function ChatScreen() {
   });
 
   useEffect(() => {
+    console.log('[Chat] Screen mounted for:', phoneNumber);
+    
+    // Load messages first
     loadMessages();
     loadContactInfo();
     loadSimInfo();
     
-    // Mark conversation as read when opening
-    markConversationAsRead();
+    // Mark conversation as read after a short delay (to ensure messages are loaded)
+    setTimeout(() => {
+      markConversationAsRead();
+    }, 500);
 
     // Keyboard event listeners
     const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (e) => {
@@ -82,14 +92,25 @@ export default function ChatScreen() {
 
   const markConversationAsRead = async () => {
     try {
+      console.log('[Chat] Marking conversation as read:', phoneNumber);
+      
+      // Mark messages as read in database
       await smsService.markAsRead(phoneNumber);
-      console.log('Conversation marked as read');
+      console.log('[Chat] Conversation marked as read successfully');
+      
+      // Wait a bit for database to update
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
       // Notify web client if connected
       if (socketService.connected) {
-        socketService.emitToServer('conversation:read', { phoneNumber });
+        socketService.emit('conversation:read', { phoneNumber });
       }
+      
+      // Force inbox to refresh by emitting event
+      // This will trigger useFocusEffect when user goes back
+      console.log('[Chat] Triggering inbox refresh');
     } catch (error) {
-      console.error('Error marking conversation as read:', error);
+      console.error('[Chat] Error marking conversation as read:', error);
     }
   };
 
@@ -105,16 +126,25 @@ export default function ChatScreen() {
 
   const loadMessages = async () => {
     try {
+      console.log('[Chat] Loading messages for:', phoneNumber);
       setIsLoading(true);
       const msgs = await smsService.readConversationMessages(phoneNumber);
-      setMessages(msgs.sort((a, b) => a.timestamp - b.timestamp));
+      const sortedMessages = msgs.sort((a, b) => a.timestamp - b.timestamp);
+      console.log(`[Chat] Loaded ${sortedMessages.length} messages`);
+      setMessages(sortedMessages);
+      
+      // Scroll to bottom after messages are loaded
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+        console.log('[Chat] Scrolled to bottom after loading');
+      }, 100);
       
       // Sync to web
       if (socketService.connected) {
-        socketService.syncMessages(msgs);
+        socketService.syncMessages(sortedMessages);
       }
     } catch (error) {
-      console.error('Error loading messages:', error);
+      console.error('[Chat] Error loading messages:', error);
     } finally {
       setIsLoading(false);
     }
@@ -166,6 +196,11 @@ export default function ChatScreen() {
     const textToSend = messageText.trim();
     setMessageText('');
     setIsSending(true);
+    
+    // Scroll to bottom to show the new message
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
 
     // Register status listener for this message
     smsService.registerStatusListener(messageId, (status, error) => {
@@ -360,53 +395,60 @@ export default function ChatScreen() {
           headerBackTitle: 'Messages',
         }} 
       />
-      <View style={styles.container}>
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.messagesList}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
-        onLayout={() => flatListRef.current?.scrollToEnd()}
-        style={styles.messagesContainer}
-      />
-
       <KeyboardAvoidingView
-        style={styles.keyboardView}
+        style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
       >
-        <View style={[styles.inputContainer, { marginBottom: keyboardHeight > 0 ? 0 : 0 }]}>
-        {isDualSim && selectedSim && (
-          <SimIndicator 
-            selectedSim={selectedSim} 
-            onPress={() => setShowSimSelector(true)}
-            compact
-          />
-        )}
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.input}
-            placeholder="Text message"
-            placeholderTextColor={COLORS.textTertiary}
-            value={messageText}
-            onChangeText={setMessageText}
-            multiline
-            maxLength={1000}
-            mode="flat"
-            underlineColor="transparent"
-            activeUnderlineColor="transparent"
-          />
-        </View>
-        <IconButton
-          icon="send"
-          size={24}
-          iconColor={messageText.trim() ? COLORS.primary : COLORS.textDisabled}
-          disabled={!messageText.trim() || isSending}
-          onPress={handleSendMessage}
-          style={messageText.trim() && styles.sendButtonActive}
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.messagesList}
+          onContentSizeChange={() => {
+            // Auto-scroll to bottom when new messages arrive
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }}
+          onLayout={() => {
+            // Scroll to bottom on initial layout
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }}
+          maintainVisibleContentPosition={{
+            minIndexForVisible: 0,
+          }}
         />
+
+        <View style={styles.inputContainer}>
+          {isDualSim && selectedSim && (
+            <SimIndicator 
+              selectedSim={selectedSim} 
+              onPress={() => setShowSimSelector(true)}
+              compact
+            />
+          )}
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.input}
+              placeholder="Text message"
+              placeholderTextColor={COLORS.textTertiary}
+              value={messageText}
+              onChangeText={setMessageText}
+              multiline
+              maxLength={1000}
+              mode="flat"
+              underlineColor="transparent"
+              activeUnderlineColor="transparent"
+            />
+          </View>
+          <IconButton
+            icon="send"
+            size={24}
+            iconColor={messageText.trim() ? COLORS.primary : COLORS.textDisabled}
+            disabled={!messageText.trim() || isSending}
+            onPress={handleSendMessage}
+            style={messageText.trim() && styles.sendButtonActive}
+          />
         </View>
       </KeyboardAvoidingView>
       
@@ -417,7 +459,6 @@ export default function ChatScreen() {
         currentSimId={selectedSim?.subscriptionId}
         phoneNumber={phoneNumber}
       />
-      </View>
     </>
   );
 }
@@ -426,16 +467,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.backgroundGray,
-  },
-  keyboardView: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
-  messagesContainer: {
-    flex: 1,
-    paddingBottom: 80, // Space for input container
   },
   loadingContainer: {
     flex: 1,
