@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, FlatList, StyleSheet, TouchableOpacity, Image, KeyboardAvoidingView, Platform } from 'react-native';
-import { TextInput, Text, ActivityIndicator, IconButton, Divider, Button } from 'react-native-paper';
+import { TextInput, Text, ActivityIndicator, IconButton, Divider, Chip } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SimSelector from '../src/components/SimSelector';
 import SimIndicator from '../src/components/SimIndicator';
 import { SimCard } from '../src/types';
@@ -9,6 +10,9 @@ import { COLORS } from '../src/config/constants';
 import smsService from '../src/services/smsService';
 import contactsService, { Contact as ContactType } from '../src/services/contactsService';
 import dualSimService from '../src/services/dualSimService';
+import usePermissions from '../src/hooks/usePermissions';
+import PermissionRequest from '../src/components/PermissionRequest';
+import DefaultSmsAppBanner from '../src/components/DefaultSmsAppBanner';
 
 interface Contact {
   id: string;
@@ -19,6 +23,7 @@ interface Contact {
 
 export default function ComposeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [recipient, setRecipient] = useState('');
   const [message, setMessage] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -29,11 +34,17 @@ export default function ComposeScreen() {
   const [selectedSim, setSelectedSim] = useState<SimCard | null>(null);
   const [showSimSelector, setShowSimSelector] = useState(false);
   const [isDualSim, setIsDualSim] = useState(false);
+  const [recipientFocused, setRecipientFocused] = useState(false);
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const permissions = usePermissions();
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   useEffect(() => {
-    loadContacts();
-    loadSimInfo();
-  }, []);
+    if (permissions.hasSmsPermissions) {
+      loadContacts();
+      loadSimInfo();
+    }
+  }, [permissions.hasSmsPermissions]);
 
   useEffect(() => {
     filterContacts();
@@ -108,42 +119,66 @@ export default function ComposeScreen() {
       return;
     }
 
-    const query = recipient.toLowerCase().trim();
-    
-    // Filter contacts by name or phone number
+    const queryRaw = recipient.trim();
+    const queryLower = queryRaw.toLowerCase();
+    // Use digits-only for phone-number matching so "+" and other characters don't block matches
+    const queryDigits = queryRaw.replace(/\D/g, '');
+
+    // Filter contacts by name or phone number (digits-only)
     const filtered = contacts.filter((contact) => {
-      const nameMatch = contact.name.toLowerCase().includes(query);
-      const phoneMatch = contact.phoneNumber.replace(/[\s-()]/g, '').includes(query.replace(/[\s-()]/g, ''));
+      const nameLower = contact.name.toLowerCase();
+      const nameMatch = nameLower.includes(queryLower);
+
+      // Normalize both sides to digits-only
+      const contactDigits = (contact.phoneNumber || '').replace(/\D/g, '');
+      const phoneMatch = queryDigits.length > 0 && (
+        contactDigits.includes(queryDigits) ||
+        // Helpful for intl numbers: match last N digits
+        contactDigits.endsWith(queryDigits)
+      );
+
       return nameMatch || phoneMatch;
     });
-    
-    // Sort: exact matches first, then starts with, then contains
+
+    // Sort: prioritize better matches
     const sorted = filtered.sort((a, b) => {
       const aNameLower = a.name.toLowerCase();
       const bNameLower = b.name.toLowerCase();
-      
-      // Exact match
-      if (aNameLower === query) return -1;
-      if (bNameLower === query) return 1;
-      
-      // Starts with
-      const aStarts = aNameLower.startsWith(query);
-      const bStarts = bNameLower.startsWith(query);
+      const aDigits = (a.phoneNumber || '').replace(/\D/g, '');
+      const bDigits = (b.phoneNumber || '').replace(/\D/g, '');
+
+      // 1) Exact phone digits match first
+      const aExactPhone = queryDigits && aDigits === queryDigits;
+      const bExactPhone = queryDigits && bDigits === queryDigits;
+      if (aExactPhone && !bExactPhone) return -1;
+      if (!aExactPhone && bExactPhone) return 1;
+
+      // 2) Exact name match
+      const aExactName = aNameLower === queryLower;
+      const bExactName = bNameLower === queryLower;
+      if (aExactName && !bExactName) return -1;
+      if (!aExactName && bExactName) return 1;
+
+      // 3) Name starts with query
+      const aStarts = aNameLower.startsWith(queryLower);
+      const bStarts = bNameLower.startsWith(queryLower);
       if (aStarts && !bStarts) return -1;
       if (!aStarts && bStarts) return 1;
-      
-      // Alphabetical
+
+      // 4) Fallback alphabetical
       return aNameLower.localeCompare(bNameLower);
     });
-    
-    setFilteredContacts(sorted.slice(0, 8)); // Show up to 8 suggestions
-    setShowSuggestions(sorted.length > 0 && recipient.length > 0);
-    
-    console.log(`[Compose] Filtered ${sorted.length} contacts for query: "${query}"`);
+
+    const top = sorted.slice(0, 8); // Show up to 8 suggestions
+    setFilteredContacts(top);
+    setShowSuggestions(top.length > 0 && recipient.length > 0);
+
+    console.log(`[Compose] Filtered ${sorted.length} contacts for query: \"${queryRaw}\" (digits=\"${queryDigits}\")`);
   };
 
   const handleContactSelect = (contact: Contact) => {
     setRecipient(contact.phoneNumber);
+    setSelectedContact(contact);
     setShowSuggestions(false);
     setFilteredContacts([]);
   };
@@ -154,22 +189,15 @@ export default function ComposeScreen() {
     setShowSuggestions(true);
   };
 
+  const handleRetryPermissions = async () => {
+    await permissions.requestSmsPermissions();
+  };
+
   const handleSend = async () => {
     if (!recipient.trim() || !message.trim() || isSending) return;
 
     try {
       setIsSending(true);
-      
-      // Check permissions first
-      const hasPerms = await smsService.hasPermissions();
-      if (!hasPerms) {
-        const granted = await smsService.requestPermissions();
-        if (!granted) {
-          alert('SMS permissions are required to send messages. Please enable them in Settings.');
-          setIsSending(false);
-          return;
-        }
-      }
       
       // Send SMS with selected SIM (only if dual SIM is available and valid)
       let subscriptionId: number | undefined = undefined;
@@ -222,6 +250,23 @@ export default function ComposeScreen() {
 
   const canSend = recipient.trim().length > 0 && message.trim().length > 0 && !isSending;
 
+  // Show permission request screen if permissions not granted
+  if (permissions.needsPermissionSetup) {
+    return <PermissionRequest onRetry={handleRetryPermissions} isLoading={permissions.isLoading} />;
+  }
+
+  // Show loading while checking permissions or loading contacts
+  if (permissions.hasSmsPermissions === null || isLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={{ marginTop: 16, color: COLORS.textSecondary }}>
+          {permissions.hasSmsPermissions === null ? 'Checking permissions...' : 'Loading contacts...'}
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.outerContainer}>
     <KeyboardAvoidingView 
@@ -231,20 +276,35 @@ export default function ComposeScreen() {
     >
       <View style={styles.recipientContainer}>
         <Text style={styles.label}>To</Text>
-        <TextInput
-          style={styles.recipientInput}
-          placeholder="Phone number or contact name"
-          placeholderTextColor={COLORS.textSecondary}
-          value={recipient}
-          onChangeText={setRecipient}
-          mode="flat"
-          dense
-          underlineColor="transparent"
-          activeUnderlineColor="transparent"
-          cursorColor={COLORS.primary}
-          selectionColor={COLORS.primaryLight}
-          textColor={COLORS.textPrimary}
-        />
+        {selectedContact ? (
+          <View style={{ flex: 1 }}>
+            <Chip
+              mode="flat"
+              onClose={() => { setSelectedContact(null); setRecipient(''); }}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              {selectedContact.name} · {selectedContact.phoneNumber}
+            </Chip>
+          </View>
+        ) : (
+          <TextInput
+            style={styles.recipientInput}
+            placeholder="Phone number or contact name"
+            placeholderTextColor={COLORS.textSecondary}
+            value={recipient}
+            onChangeText={(txt) => { setRecipient(txt); setShowSuggestions(!!txt.trim()); }}
+            onFocus={() => setRecipientFocused(true)}
+            onBlur={() => setRecipientFocused(false)}
+            mode="flat"
+            dense
+            underlineColor="transparent"
+            activeUnderlineColor="transparent"
+            cursorColor={COLORS.primary}
+            selectionColor={COLORS.primaryLight}
+            textColor={COLORS.textPrimary}
+            right={<TextInput.Icon icon="close" onPress={() => { setRecipient(''); setFilteredContacts([]); setShowSuggestions(false); }} />}
+          />
+        )}
         <IconButton
           icon="account-circle"
           size={24}
@@ -253,15 +313,21 @@ export default function ComposeScreen() {
         />
       </View>
 
-      {showSuggestions && filteredContacts.length > 0 && (
+      {showSuggestions && (
         <View style={styles.suggestionsContainer}>
-          <FlatList
-            data={filteredContacts}
-            renderItem={renderContact}
-            keyExtractor={(item) => item.id}
-            style={styles.suggestionsList}
-            keyboardShouldPersistTaps="handled"
-          />
+          {filteredContacts.length > 0 ? (
+            <FlatList
+              data={filteredContacts}
+              renderItem={renderContact}
+              keyExtractor={(item) => item.id}
+              style={styles.suggestionsList}
+              keyboardShouldPersistTaps="handled"
+            />
+          ) : (
+            <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+              <Text style={{ color: COLORS.textSecondary }}>No contacts found</Text>
+            </View>
+          )}
         </View>
       )}
 
@@ -275,6 +341,15 @@ export default function ComposeScreen() {
             showLabel
           />
         </View>
+      )}
+
+      {/* Default SMS App Banner */}
+      {permissions.needsDefaultSmsSetup && !bannerDismissed && (
+        <DefaultSmsAppBanner
+          onSetDefault={permissions.requestDefaultSmsApp}
+          onDismiss={() => setBannerDismissed(true)}
+          isLoading={permissions.isLoading}
+        />
       )}
 
       <View style={styles.messageContainer}>
@@ -295,7 +370,7 @@ export default function ComposeScreen() {
         />
       </View>
 
-      <View style={styles.sendButtonContainer}>
+      <View style={[styles.sendButtonContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <IconButton
           icon="send"
           size={28}
@@ -345,17 +420,24 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginRight: 12,
     fontWeight: '500',
+    width: 28,
   },
   recipientInput: {
     flex: 1,
     backgroundColor: 'transparent',
     fontSize: 16,
+    minHeight: 40,
   },
   suggestionsContainer: {
-    maxHeight: 200,
+    maxHeight: 240,
     backgroundColor: COLORS.background,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+    zIndex: 10,
   },
   suggestionsList: {
     flex: 1,
@@ -426,6 +508,7 @@ const styles = StyleSheet.create({
   },
   sendButton: {
     margin: 0,
+    borderRadius: 24,
   },
   sendButtonActive: {
     backgroundColor: COLORS.primaryLight,

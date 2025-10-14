@@ -50,6 +50,42 @@ export default function RootLayout() {
       // Initialize socket connection
       const deviceInfo = await getDeviceInfo();
       socketService.initialize(deviceInfo);
+
+      // Global socket listeners (active regardless of current screen)
+      socketService.on('send:message', async (data: { phoneNumber: string; message: string; tempId?: string }) => {
+        try {
+          console.log('[Root] Web requested send to', data.phoneNumber);
+          await smsService.sendSMS(data.phoneNumber, data.message);
+        } catch (e) {
+          console.error('[Root] Failed to send web-initiated message:', e);
+        }
+      });
+
+      socketService.on('request:sync', async () => {
+        try {
+          console.log('[Root] Web requested sync');
+          const convs = await smsService.getConversations();
+          socketService.syncConversations(convs);
+        } catch (e) {
+          console.error('[Root] Failed to sync conversations:', e);
+        }
+      });
+
+      socketService.on('mark:read', async (data: { conversationId: string }) => {
+        try {
+          console.log('[Root] Web requested mark as read for', data.conversationId);
+          await smsService.markAsRead(data.conversationId);
+          // After marking, push fresh conversations to web
+          try {
+            const convs = await smsService.getConversations();
+            socketService.syncConversations(convs);
+          } catch (syncErr) {
+            console.error('[Root] Failed to sync conversations after mark-as-read:', syncErr);
+          }
+        } catch (e) {
+          console.error('[Root] Failed to mark as read:', e);
+        }
+      });
       
     } catch (error) {
       console.error('Error initializing app:', error);

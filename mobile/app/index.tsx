@@ -4,12 +4,14 @@ import { FAB, Searchbar, Text, ActivityIndicator, IconButton } from 'react-nativ
 import { useRouter, useFocusEffect } from 'expo-router';
 import ConversationItem from '../src/components/ConversationItem';
 import PermissionRequest from '../src/components/PermissionRequest';
+import DefaultSmsAppBanner from '../src/components/DefaultSmsAppBanner';
 import { Conversation } from '../src/types';
 import { COLORS } from '../src/config/constants';
 import smsService from '../src/services/smsService';
 import socketService from '../src/services/socketService';
 import contactsService from '../src/services/contactsService';
 import { useSmsListener } from '../src/hooks/useSmsListener';
+import usePermissions from '../src/hooks/usePermissions';
 import { DeviceEventEmitter } from 'react-native';
 
 export default function InboxScreen() {
@@ -19,11 +21,11 @@ export default function InboxScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [hasPermissions, setHasPermissions] = useState<boolean | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  
+  const permissions = usePermissions();
 
-  useEffect(() => {
-    checkPermissions();
-  }, []);
+  // Remove the old checkPermissions useEffect since usePermissions handles it
 
   // Handle incoming SMS messages in real-time
   useSmsListener({
@@ -38,20 +40,19 @@ export default function InboxScreen() {
   // This ensures unread badges update after marking messages as read in chat
   useFocusEffect(
     useCallback(() => {
-      if (hasPermissions) {
+      if (permissions.hasSmsPermissions) {
         console.log('[Inbox] Screen focused, refreshing conversations to update badges...');
         // Small delay to ensure any mark-as-read operations are complete
         setTimeout(() => {
           loadConversations();
         }, 200);
       }
-    }, [hasPermissions])
+    }, [permissions.hasSmsPermissions])
   );
 
   useEffect(() => {
-    if (hasPermissions) {
+    if (permissions.hasSmsPermissions) {
       loadConversations();
-      setupSocketListeners();
       
       // Load contacts in background
       contactsService.loadContacts().catch(err => 
@@ -60,9 +61,9 @@ export default function InboxScreen() {
     }
 
     return () => {
-      // Cleanup socket listeners
+      // No-op
     };
-  }, [hasPermissions]);
+  }, [permissions.hasSmsPermissions]);
 
   useEffect(() => {
     filterConversations();
@@ -73,40 +74,32 @@ export default function InboxScreen() {
       console.log('[Inbox] conversation:read event for', evt?.phoneNumber);
       loadConversations();
     });
-    return () => sub.remove();
+
+    // Respond to server request:sync to push fresh state
+    const onRequestSync = async () => {
+      console.log('[Inbox] request:sync received - syncing conversations');
+      await syncToWeb();
+    };
+    socketService.on('request:sync', onRequestSync);
+
+    return () => {
+      sub.remove();
+      socketService.off('request:sync', onRequestSync);
+    };
   }, []);
 
-  const checkPermissions = async () => {
-    try {
-      const hasPerms = await smsService.hasPermissions();
-      setHasPermissions(hasPerms);
-      
-      if (!hasPerms) {
-        // Try to request permissions
-        const granted = await smsService.requestPermissions();
-        setHasPermissions(granted);
-      }
-    } catch (error) {
-      console.error('Error checking permissions:', error);
-      setHasPermissions(false);
-    }
-  };
-
   const handleRetryPermissions = async () => {
-    await checkPermissions();
+    await permissions.requestSmsPermissions();
   };
 
-  const setupSocketListeners = () => {
-    socketService.on('request:sync', () => {
-      console.log('Sync requested from web');
-      syncToWeb();
-    });
-
-    socketService.on('send:message', async (data) => {
-      const { phoneNumber, message } = data;
-      await handleSendMessage(phoneNumber, message);
-    });
+  const handleSetDefaultSmsApp = async () => {
+    await permissions.requestDefaultSmsApp();
   };
+
+  const handleDismissBanner = () => {
+    setBannerDismissed(true);
+  };
+
 
 
   const loadConversations = async () => {
@@ -133,7 +126,7 @@ export default function InboxScreen() {
       console.error('[Inbox] Error loading conversations:', error);
       // Check if it's a permission error
       if (error instanceof Error && error.message.includes('permission')) {
-        setHasPermissions(false);
+        permissions.refresh();
       }
     } finally {
       setIsLoading(false);
@@ -203,17 +196,17 @@ export default function InboxScreen() {
   );
 
   // Show permission request screen if permissions not granted
-  if (hasPermissions === false) {
-    return <PermissionRequest onRetry={handleRetryPermissions} />;
+  if (permissions.needsPermissionSetup) {
+    return <PermissionRequest onRetry={handleRetryPermissions} isLoading={permissions.isLoading} />;
   }
 
   // Show loading while checking permissions or loading conversations
-  if (hasPermissions === null || isLoading) {
+  if (permissions.hasSmsPermissions === null || isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
         <Text style={styles.loadingText}>
-          {hasPermissions === null ? 'Checking permissions...' : 'Loading messages...'}
+          {permissions.hasSmsPermissions === null ? 'Checking permissions...' : 'Loading messages...'}
         </Text>
       </View>
     );
@@ -221,6 +214,15 @@ export default function InboxScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Default SMS App Banner */}
+      {permissions.needsDefaultSmsSetup && !bannerDismissed && (
+        <DefaultSmsAppBanner
+          onSetDefault={handleSetDefaultSmsApp}
+          onDismiss={handleDismissBanner}
+          isLoading={permissions.isLoading}
+        />
+      )}
+      
       <View style={styles.searchContainer}>
         <Searchbar
           placeholder="Search conversations"

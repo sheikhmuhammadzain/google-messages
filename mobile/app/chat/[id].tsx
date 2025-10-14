@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Keyboard, Platform } from 'react-native';
+import { View, StyleSheet, Keyboard, Platform, DeviceEventEmitter, Alert } from 'react-native';
 import { TextInput, IconButton, ActivityIndicator } from 'react-native-paper';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +14,9 @@ import socketService from '../../src/services/socketService';
 import contactsService from '../../src/services/contactsService';
 import dualSimService from '../../src/services/dualSimService';
 import { useSmsListener } from '../../src/hooks/useSmsListener';
+import usePermissions from '../../src/hooks/usePermissions';
+import PermissionRequest from '../../src/components/PermissionRequest';
+import DefaultSmsAppBanner from '../../src/components/DefaultSmsAppBanner';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -29,8 +32,13 @@ export default function ChatScreen() {
   const [showSimSelector, setShowSimSelector] = useState(false);
   const [isDualSim, setIsDualSim] = useState(false);
   const flatListRef = useRef<any>(null);
+  const permissions = usePermissions();
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [nowTick, setNowTick] = useState(Date.now());
   const insets = useSafeAreaInsets();
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  // Extra padding to keep the input slightly above the keyboard on Android
+  const KEYBOARD_EXTRA_OFFSET = 12;
 
   // Handle incoming SMS messages in real-time
   useSmsListener({
@@ -62,27 +70,53 @@ export default function ChatScreen() {
           socketService.syncMessages([newMessage]);
         }
       }
-    }, [phoneNumber]),
+  }, [phoneNumber]),
   });
+
+  const handleRetryPermissions = async () => {
+    await permissions.requestSmsPermissions();
+  };
 
   useEffect(() => {
     console.log('[Chat] Screen mounted for:', phoneNumber);
     
-    // Load messages first
-    loadMessages();
-    loadContactInfo();
-    loadSimInfo();
-    
-    // Mark conversation as read after a short delay (to ensure messages are loaded)
-    setTimeout(() => {
-      markConversationAsRead();
-    }, 500);
+    // Only initialize chat if we have permissions
+    if (permissions.hasSmsPermissions) {
+      console.log('[Chat] Initializing chat with permissions');
+      
+      // Load messages first
+      loadMessages();
+      loadContactInfo();
+      loadSimInfo();
+      
+      // Mark conversation as read after a short delay (to ensure messages are loaded)
+      setTimeout(() => {
+        markConversationAsRead();
+      }, 500);
+    }
+  }, [phoneNumber, insets?.bottom, permissions.hasSmsPermissions]);
 
+  // Periodic tick for UI that depends on current time (e.g., delivery delays)
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Respond to server sync requests (simple conflict resolution by pushing fresh state)
+  useEffect(() => {
+    const handler = () => {
+      console.log('[Chat] request:sync received - syncing messages for this conversation');
+      // Reload and emit current state
+      loadMessages(false);
+    };
+    socketService.on('request:sync', handler);
+    return () => socketService.off('request:sync', handler);
+  }, []);
     // Keyboard listeners (Android) to keep input above keyboard reliably
     const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
       const height = e.endCoordinates?.height ?? 0;
-      // Subtract bottom inset to avoid double spacing
-      const offset = Math.max(height - (insets?.bottom ?? 0), 0);
+      // Subtract bottom inset to avoid double spacing, then add a small buffer
+      const offset = Math.max(height - (insets?.bottom ?? 0), 0) + KEYBOARD_EXTRA_OFFSET;
       setKeyboardOffset(offset);
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
@@ -93,7 +127,7 @@ export default function ChatScreen() {
       showSub.remove();
       hideSub.remove();
     };
-  }, [phoneNumber, insets?.bottom]);
+  }, [phoneNumber, insets?.bottom, permissions.hasSmsPermissions]);
 
   const markConversationAsRead = async () => {
     try {
@@ -103,19 +137,23 @@ export default function ChatScreen() {
       await smsService.markAsRead(phoneNumber);
       console.log('[Chat] Conversation marked as read successfully');
       
-      // Emit local event so inbox can update immediately
+      // Wait for Android SMS database to propagate changes before updating lists
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // Emit local event so inbox can update immediately (after propagation)
       DeviceEventEmitter.emit('conversation:read', { phoneNumber });
       
-      // Wait longer for Android SMS database to update and sync
-      // The content provider might need time to propagate changes
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      // Notify web client if connected
+      // Notify web client if connected by pushing a fresh conversations sync
       if (socketService.connected) {
-        socketService.emitToServer('conversation:read', { phoneNumber });
+        try {
+          const convs = await smsService.getConversations();
+          socketService.syncConversations(convs);
+        } catch (e) {
+          console.log('[Chat] Could not sync conversations to web after mark-as-read:', e);
+        }
       }
       
-      console.log('[Chat] Mark as read complete - inbox will refresh on focus');
+      console.log('[Chat] Mark as read complete - inbox will refresh');
     } catch (error) {
       console.error('[Chat] Error marking conversation as read:', error);
     }
@@ -183,6 +221,35 @@ export default function ChatScreen() {
     }
   };
 
+  // Robust status updater that works even if the temp message gets replaced by DB entry
+  const updateMessageStatusLocal = useCallback((opts: { id?: string; body?: string; sentAt?: number; status: 'sent' | 'delivered' | 'failed' }) => {
+    setMessages(prev => {
+      let updated = false;
+      const next = prev.map(m => {
+        if (opts.id && m.id === opts.id) {
+          updated = true;
+          return { ...m, status: opts.status };
+        }
+        return m;
+      });
+
+      if (updated) return next;
+
+      // Fallback: try to match by content and timestamp proximity (if DB replaced the temp ID)
+      if (opts.body && opts.sentAt) {
+        const PROXIMITY_MS = 15_000; // 15s window
+        const idx = next.findIndex(m => m.type === 'sent' && m.body === opts.body && Math.abs(m.timestamp - opts.sentAt) <= PROXIMITY_MS);
+        if (idx !== -1) {
+          const copy = [...next];
+          copy[idx] = { ...copy[idx], status: opts.status };
+          return copy;
+        }
+      }
+
+      return next;
+    });
+  }, []);
+
 
   const handleSendMessage = async () => {
     if (!messageText.trim() || isSending) return;
@@ -214,18 +281,8 @@ export default function ChatScreen() {
     smsService.registerStatusListener(messageId, (status, error) => {
       console.log(`Message ${messageId} status:`, status, error);
       
-      setMessages((prev) =>
-        prev.map((msg) => {
-          if (msg.id === messageId) {
-            if (status === 'sent' || status === 'delivered') {
-              return { ...msg, status: 'sent' };
-            } else if (status === 'failed') {
-              return { ...msg, status: 'failed' };
-            }
-          }
-          return msg;
-        })
-      );
+      // Update status by ID, or fallback by content+time if DB replaced temp ID
+      updateMessageStatusLocal({ id: messageId, body: textToSend, sentAt: tempMessage.timestamp, status: status === 'failed' ? 'failed' : (status === 'delivered' ? 'delivered' : 'sent') });
 
       // Show error if failed
       if (status === 'failed' && error) {
@@ -245,15 +302,6 @@ export default function ChatScreen() {
     });
 
     try {
-      // Check permissions first
-      const hasPerms = await smsService.hasPermissions();
-      if (!hasPerms) {
-        const granted = await smsService.requestPermissions();
-        if (!granted) {
-          throw new Error('SMS permissions are required to send messages. Please enable them in Settings.');
-        }
-      }
-      
       // Send SMS with message ID for tracking (and subscription ID for dual SIM)
       // Only pass subscriptionId if we're on dual SIM device and have a valid selection
       let subscriptionId: number | undefined = undefined;
@@ -267,15 +315,16 @@ export default function ChatScreen() {
       
       await smsService.sendSMS(phoneNumber, textToSend, messageId, subscriptionId);
       
-      // Initial status update (actual status will come from broadcast receiver)
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === messageId ? { ...msg, status: 'sent' } : msg
-        )
-      );
+      // Initial status update (actual status may also come from broadcast receiver)
+      updateMessageStatusLocal({ id: messageId, body: textToSend, sentAt: tempMessage.timestamp, status: 'sent' });
 
       // Ensure UI doesn't stay in sending state if sent broadcast is delayed
       setIsSending(false);
+
+      // As a safety net, re-apply status shortly after to force re-render if needed
+      setTimeout(() => {
+        updateMessageStatusLocal({ id: messageId, body: textToSend, sentAt: tempMessage.timestamp, status: 'sent' });
+      }, 400);
 
       // Notify socket
       socketService.updateMessageStatus(messageId, 'sent');
@@ -313,6 +362,17 @@ export default function ChatScreen() {
   const handleRetryMessage = async (message: Message) => {
     if (isSending) return;
 
+    // Ensure we still have permissions before retrying
+    const hasPerms = await smsService.hasPermissions();
+    if (!hasPerms) {
+      Alert.alert(
+        'Permissions Required',
+        'SMS permissions are required to send messages. Please enable them in Settings.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     // Remove failed message from UI
     setMessages((prev) => prev.filter((msg) => msg.id !== message.id));
 
@@ -331,18 +391,7 @@ export default function ChatScreen() {
 
     // Register status listener
     smsService.registerStatusListener(newMessageId, (status, error) => {
-      setMessages((prev) =>
-        prev.map((msg) => {
-          if (msg.id === newMessageId) {
-            if (status === 'sent' || status === 'delivered') {
-              return { ...msg, status: 'sent' };
-            } else if (status === 'failed') {
-              return { ...msg, status: 'failed' };
-            }
-          }
-          return msg;
-        })
-      );
+      updateMessageStatusLocal({ id: newMessageId, body: retryMessage.body, sentAt: retryMessage.timestamp, status: status === 'failed' ? 'failed' : (status === 'delivered' ? 'delivered' : 'sent') });
 
       if (status === 'failed' && error) {
         alert(`Retry failed: ${error}`);
@@ -358,11 +407,7 @@ export default function ChatScreen() {
       console.log('Retrying SMS with subscriptionId:', subscriptionId, 'from SIM:', selectedSim?.displayName);
       await smsService.sendSMS(phoneNumber, retryMessage.body, newMessageId, subscriptionId);
       
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === newMessageId ? { ...msg, status: 'sent' } : msg
-        )
-      );
+      updateMessageStatusLocal({ id: newMessageId, body: retryMessage.body, sentAt: retryMessage.timestamp, status: 'sent' });
 
       socketService.updateMessageStatus(newMessageId, 'sent');
       setTimeout(() => loadMessages(false), 800);
@@ -370,11 +415,7 @@ export default function ChatScreen() {
       console.error('Error retrying message:', error);
       alert(error?.message || 'Retry failed. Please try again.');
       
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === newMessageId ? { ...msg, status: 'failed' } : msg
-        )
-      );
+      updateMessageStatusLocal({ id: newMessageId, body: retryMessage.body, sentAt: retryMessage.timestamp, status: 'failed' });
 
       smsService.unregisterStatusListener(newMessageId);
       
@@ -423,13 +464,20 @@ export default function ChatScreen() {
 
   const renderMessage = ({ item }: { item: Message }) => (
     <MessageBubble 
-      message={item} 
+      message={item}
+      currentTime={nowTick}
       onRetry={item.status === 'failed' ? () => handleRetryMessage(item) : undefined}
       onDelete={() => handleDeleteMessage(item)}
     />
   );
 
-  if (isLoading) {
+  // Show permission request screen if permissions not granted
+  if (permissions.needsPermissionSetup) {
+    return <PermissionRequest onRetry={handleRetryPermissions} isLoading={permissions.isLoading} />;
+  }
+
+  // Show loading while checking permissions or loading conversations
+  if (permissions.hasSmsPermissions === null || isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
@@ -446,6 +494,14 @@ export default function ChatScreen() {
         }} 
       />
       <View style={styles.container}>
+        {/* Default SMS App Banner */}
+        {permissions.needsDefaultSmsSetup && !bannerDismissed && (
+          <DefaultSmsAppBanner
+            onSetDefault={permissions.requestDefaultSmsApp}
+            onDismiss={() => setBannerDismissed(true)}
+            isLoading={permissions.isLoading}
+          />
+        )}
         <KeyboardAwareFlatList
           ref={flatListRef}
           data={messages}
@@ -455,7 +511,8 @@ export default function ChatScreen() {
           // Keyboard-aware scroll view props
           enableOnAndroid={true}
           enableAutomaticScroll={true}
-          extraScrollHeight={24}
+          // Slightly larger extra scroll to keep last message and input visible above keyboard
+          extraScrollHeight={32}
           keyboardOpeningTime={0}
           keyboardShouldPersistTaps="handled"
           // Auto-scroll behavior

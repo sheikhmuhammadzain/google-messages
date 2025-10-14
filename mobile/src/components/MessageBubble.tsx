@@ -10,11 +10,14 @@ interface Props {
   showTimestamp?: boolean;
   onRetry?: () => void;
   onDelete?: () => void;
+  currentTime?: number;
 }
 
-export default function MessageBubble({ message, showTimestamp = true, onRetry, onDelete }: Props) {
+export default function MessageBubble({ message, showTimestamp = true, onRetry, onDelete, currentTime }: Props) {
   const isSent = message.type === 'sent';
   const isFailed = message.status === 'failed';
+  const DELIVERY_WARN_MS = 5 * 60 * 1000; // 5 minutes
+  const isDeliveryDelayed = isSent && message.status === 'sent' && typeof currentTime === 'number' && (currentTime - message.timestamp) > DELIVERY_WARN_MS;
 
   const handleLongPress = () => {
     if (onDelete) {
@@ -60,7 +63,7 @@ export default function MessageBubble({ message, showTimestamp = true, onRetry, 
             {isSent && message.status && (
               <Text style={styles.status}>
                 {message.status === 'sending' && '⏳'}
-                {message.status === 'sent' && '✓'}
+                {message.status === 'sent' && (isDeliveryDelayed ? '✓ ⏱️' : '✓')}
                 {message.status === 'delivered' && '✓✓'}
                 {message.status === 'failed' && '✗ Failed'}
               </Text>

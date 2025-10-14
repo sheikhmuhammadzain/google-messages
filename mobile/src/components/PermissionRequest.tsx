@@ -1,12 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert } from 'react-native';
-import { Icon } from 'react-native-paper';
+import { Icon, ActivityIndicator } from 'react-native-paper';
 
 interface PermissionRequestProps {
   onRetry: () => void;
+  isLoading?: boolean;
 }
 
-export default function PermissionRequest({ onRetry }: PermissionRequestProps) {
+export default function PermissionRequest({ onRetry, isLoading = false }: PermissionRequestProps) {
   const openSettings = () => {
     Alert.alert(
       'Open Settings',
@@ -52,11 +53,18 @@ export default function PermissionRequest({ onRetry }: PermissionRequestProps) {
         </View>
       </View>
 
-      <TouchableOpacity style={styles.primaryButton} onPress={onRetry}>
-        <Text style={styles.primaryButtonText}>Grant Permissions</Text>
+      <TouchableOpacity style={[styles.primaryButton, isLoading && styles.primaryButtonDisabled]} onPress={onRetry} disabled={isLoading}>
+        {isLoading ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size={18} color="#ffffff" />
+            <Text style={[styles.primaryButtonText, { marginLeft: 8 }]}>Requesting...</Text>
+          </View>
+        ) : (
+          <Text style={styles.primaryButtonText}>Grant Permissions</Text>
+        )}
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.secondaryButton} onPress={openSettings}>
+      <TouchableOpacity style={styles.secondaryButton} onPress={openSettings} disabled={isLoading}>
         <Text style={styles.secondaryButtonText}>Open Settings Manually</Text>
       </TouchableOpacity>
 
@@ -68,6 +76,14 @@ export default function PermissionRequest({ onRetry }: PermissionRequestProps) {
 }
 
 const styles = StyleSheet.create({
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonDisabled: {
+    opacity: 0.85,
+  },
   container: {
     flex: 1,
     justifyContent: 'center',

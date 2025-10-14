@@ -14,6 +14,7 @@ interface MessagesState {
   addMessage: (message: Message) => void;
   updateMessageStatus: (messageId: string, status: string) => void;
   setActiveConversation: (conversationId: string | null) => void;
+  markConversationRead: (conversationId: string) => void;
   setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
   clearMessages: () => void;
@@ -93,6 +94,12 @@ export const useMessagesStore = create<MessagesState>((set, get) => ({
 
   setActiveConversation: (conversationId) => {
     set({ activeConversation: conversationId });
+  },
+
+  markConversationRead: (conversationId) => {
+    const { conversations } = get();
+    const updated = conversations.map(c => c.id === conversationId ? { ...c, unreadCount: 0 } : c);
+    set({ conversations: updated });
   },
 
   setLoading: (isLoading) => {

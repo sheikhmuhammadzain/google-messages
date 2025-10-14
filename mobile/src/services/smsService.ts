@@ -471,20 +471,29 @@ class SMSService {
       
       for (const message of unreadMessages) {
         try {
-          await new Promise<void>((resolve, reject) => {
-            SmsAndroid.markAsRead(
-              message.id,
-              (fail: string) => {
-                console.error(`[smsService] Failed to mark message ${message.id}:`, fail);
-                // Don't reject, continue with other messages
-                resolve();
-              },
-              (success: string) => {
-                console.log(`[smsService] ✓ Marked message ${message.id} as read`);
-                markedCount++;
-                resolve();
-              }
-            );
+          await new Promise<void>((resolve) => {
+            // Ensure we pass a numeric ID where supported (some devices expect number)
+            const numericId = Number(message.id);
+            const idToUse: any = Number.isNaN(numericId) ? message.id : numericId;
+
+            try {
+              SmsAndroid.markAsRead(
+                idToUse,
+                (fail: string) => {
+                  console.error(`[smsService] Failed to mark message ${message.id}:`, fail);
+                  // Don't reject, continue with other messages
+                  resolve();
+                },
+                (success: string) => {
+                  console.log(`[smsService] ✓ Marked message ${message.id} as read`);
+                  markedCount++;
+                  resolve();
+                }
+              );
+            } catch (innerErr) {
+              console.error(`[smsService] markAsRead call threw for ${message.id}:`, innerErr);
+              resolve();
+            }
           });
         } catch (error) {
           console.error(`[smsService] Error marking message ${message.id}:`, error);

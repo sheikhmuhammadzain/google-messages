@@ -45,6 +45,7 @@ export default function MessagesPage() {
     addMessage,
     updateMessageStatus,
     setActiveConversation,
+    markConversationRead,
   } = useMessagesStore();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -95,8 +96,18 @@ export default function MessagesPage() {
     });
 
     socketService.on('messages:sync', (data: { messages: Message[] }) => {
+      const msgs = data.messages || [];
+      if (msgs.length > 0) {
+        // Use the conversationId from the payload to avoid stale activeConversation
+        const convId = msgs[0].conversationId || msgs[0].phoneNumber;
+        if (convId) {
+          setMessages(convId, msgs);
+          return;
+        }
+      }
+      // Fallback: if payload empty, refresh current conversation messages map
       if (activeConversation) {
-        setMessages(activeConversation, data.messages);
+        setMessages(activeConversation, msgs);
       }
     });
 
@@ -135,8 +146,14 @@ export default function MessagesPage() {
 
   const handleConversationSelect = (conversation: Conversation) => {
     setActiveConversation(conversation.id);
+
+    // Optimistically clear unread badge in the list
+    markConversationRead(conversation.id);
     
-    // Request messages for this conversation
+    // Tell mobile to mark as read in the SMS DB
+    socketService.markAsRead(conversation.id);
+    
+    // Optionally request a sync
     socketService.requestSync();
   };
 

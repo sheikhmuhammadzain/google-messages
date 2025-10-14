@@ -31,21 +31,76 @@ class DualSimService {
    * Load available SIM cards from device
    */
   async loadSimCards(): Promise<SimCard[]> {
-    if (Platform.OS !== 'android' || !DualSimManager) {
+    if (Platform.OS !== 'android') {
       this.simCards = [];
+      this.isDualSim = false;
+      return [];
+    }
+
+    if (!DualSimManager) {
+      console.warn('DualSimManager native module not available');
+      this.simCards = [];
+      this.isDualSim = false;
       return [];
     }
 
     try {
+      console.log('Loading SIM cards from device...');
       const cards = await DualSimManager.getSimCards();
-      this.simCards = cards || [];
+      
+      // Validate the response
+      if (!Array.isArray(cards)) {
+        console.error('Invalid response from DualSimManager.getSimCards:', typeof cards, cards);
+        this.simCards = [];
+        this.isDualSim = false;
+        return [];
+      }
+
+      // Filter out invalid SIM cards and validate required fields
+      const validCards = cards.filter((card: any) => {
+        if (!card || typeof card !== 'object') {
+          console.warn('Skipping invalid SIM card (not an object):', card);
+          return false;
+        }
+        
+        if (typeof card.subscriptionId !== 'number' || card.subscriptionId < 0) {
+          console.warn('Skipping SIM card with invalid subscriptionId:', card);
+          return false;
+        }
+        
+        if (!card.displayName || typeof card.displayName !== 'string') {
+          console.warn('Skipping SIM card with invalid displayName:', card);
+          return false;
+        }
+        
+        return true;
+      });
+      
+      this.simCards = validCards;
       this.isDualSim = this.simCards.length > 1;
       
-      console.log(`Loaded ${this.simCards.length} SIM card(s):`, this.simCards);
+      console.log(`✅ Loaded ${this.simCards.length} valid SIM card(s):`);
+      this.simCards.forEach((card, index) => {
+        console.log(`  SIM ${index + 1}: ${card.displayName} (ID: ${card.subscriptionId}, Default: ${card.isDefaultSms})`);
+      });
+      
       return this.simCards;
-    } catch (error) {
-      console.error('Error loading SIM cards:', error);
+    } catch (error: any) {
+      console.error('❌ Error loading SIM cards:', error);
+      
+      // Provide more specific error information
+      let errorMessage = 'Failed to load SIM cards';
+      if (error.code === 'PERMISSION_DENIED') {
+        errorMessage = 'Permission denied accessing SIM cards';
+      } else if (error.message?.includes('timeout')) {
+        errorMessage = 'Timeout loading SIM cards';
+      } else if (error.message) {
+        errorMessage = `SIM loading error: ${error.message}`;
+      }
+      
+      console.error(errorMessage);
       this.simCards = [];
+      this.isDualSim = false;
       return [];
     }
   }
@@ -157,16 +212,59 @@ class DualSimService {
    * Save SIM preference for a contact
    */
   async saveSimPreference(phoneNumber: string, subscriptionId: number): Promise<void> {
-    // Normalize phone number (remove spaces, dashes, etc.)
-    const normalizedNumber = phoneNumber.replace(/[\s\-()]/g, '');
-    
-    this.simPreferences.set(normalizedNumber, {
-      phoneNumber: normalizedNumber,
-      subscriptionId,
-      lastUsed: Date.now()
-    });
-    
-    await this.saveSimPreferencesToStorage();
+    try {
+      // Validate inputs
+      if (!phoneNumber || typeof phoneNumber !== 'string') {
+        throw new Error('Invalid phone number provided');
+      }
+      
+      if (typeof subscriptionId !== 'number' || subscriptionId < 0) {
+        throw new Error('Invalid subscription ID provided');
+      }
+
+      // Validate that the subscription ID exists in our loaded SIM cards
+      const sim = this.getSimCardBySubscriptionId(subscriptionId);
+      if (!sim) {
+        console.warn(`Saving preference for unknown subscription ID: ${subscriptionId}`);
+      }
+
+      // Normalize phone number (remove spaces, dashes, etc.)
+      const normalizedNumber = phoneNumber.replace(/[\s\-()]/g, '');
+      
+      this.simPreferences.set(normalizedNumber, {
+        phoneNumber: normalizedNumber,
+        subscriptionId,
+        lastUsed: Date.now()
+      });
+      
+      await this.saveSimPreferencesToStorage();
+      console.log(`Saved SIM preference for ${normalizedNumber}: subscription ${subscriptionId}`);
+    } catch (error) {
+      console.error(`Error saving SIM preference for ${phoneNumber}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear SIM preference for a specific contact
+   */
+  async clearSimPreference(phoneNumber: string): Promise<void> {
+    try {
+      if (!phoneNumber || typeof phoneNumber !== 'string') {
+        throw new Error('Invalid phone number provided');
+      }
+
+      const normalizedNumber = phoneNumber.replace(/[\s\-()]/g, '');
+      
+      if (this.simPreferences.has(normalizedNumber)) {
+        this.simPreferences.delete(normalizedNumber);
+        await this.saveSimPreferencesToStorage();
+        console.log(`Cleared SIM preference for ${normalizedNumber}`);
+      }
+    } catch (error) {
+      console.error(`Error clearing SIM preference for ${phoneNumber}:`, error);
+      throw error;
+    }
   }
 
   /**
@@ -185,30 +283,46 @@ class DualSimService {
    * 3. First available SIM
    */
   async getRecommendedSimForContact(phoneNumber: string): Promise<SimCard | null> {
-    // Check if we have a preference for this contact
-    const preference = this.getSimPreference(phoneNumber);
-    if (preference) {
-      const sim = this.getSimCardBySubscriptionId(preference.subscriptionId);
-      if (sim) {
-        console.log(`Using saved preference for ${phoneNumber}: SIM ${sim.displayName}`);
-        return sim;
+    try {
+      // Refresh SIM cards if we don't have any loaded
+      if (this.simCards.length === 0) {
+        console.log('No SIM cards loaded, attempting to reload...');
+        await this.loadSimCards();
       }
-    }
 
-    // Use default SMS SIM
-    const defaultSim = this.getDefaultSimCard();
-    if (defaultSim) {
-      console.log(`Using default SIM for ${phoneNumber}: ${defaultSim.displayName}`);
-      return defaultSim;
-    }
+      // Check if we have a preference for this contact
+      const preference = this.getSimPreference(phoneNumber);
+      if (preference) {
+        const sim = this.getSimCardBySubscriptionId(preference.subscriptionId);
+        if (sim) {
+          console.log(`Using saved preference for ${phoneNumber}: SIM ${sim.displayName}`);
+          return sim;
+        } else {
+          console.warn(`Saved SIM preference for ${phoneNumber} (subscription ID: ${preference.subscriptionId}) is no longer valid. Clearing preference.`);
+          // Remove the stale preference
+          await this.clearSimPreference(phoneNumber);
+        }
+      }
 
-    // Fallback to first available SIM
-    if (this.simCards.length > 0) {
-      console.log(`Using first available SIM for ${phoneNumber}: ${this.simCards[0].displayName}`);
-      return this.simCards[0];
-    }
+      // Use default SMS SIM
+      const defaultSim = this.getDefaultSimCard();
+      if (defaultSim) {
+        console.log(`Using default SIM for ${phoneNumber}: ${defaultSim.displayName}`);
+        return defaultSim;
+      }
 
-    return null;
+      // Fallback to first available SIM
+      if (this.simCards.length > 0) {
+        console.log(`Using first available SIM for ${phoneNumber}: ${this.simCards[0].displayName}`);
+        return this.simCards[0];
+      }
+
+      console.warn(`No SIM cards available for ${phoneNumber}`);
+      return null;
+    } catch (error) {
+      console.error(`Error getting recommended SIM for ${phoneNumber}:`, error);
+      return null;
+    }
   }
 
   /**

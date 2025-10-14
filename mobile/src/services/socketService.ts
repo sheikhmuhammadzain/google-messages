@@ -10,6 +10,12 @@ class SocketService {
   private isConnected: boolean = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private eventHandlers: Map<string, Set<EventCallback>> = new Map();
+  private reconnectAttempts: number = 0;
+  private readonly maxReconnectAttempts: number = 10;
+  private readonly baseReconnectDelay: number = 1000;
+  private readonly maxReconnectDelay: number = 30000;
+  private connectionError: string | null = null;
+  private lastConnectionAttempt: number = 0;
 
   /**
    * Initialize socket connection
@@ -27,13 +33,35 @@ class SocketService {
       return;
     }
 
-    console.log('🔌 Connecting to socket server...');
+    // Check if we've exceeded max reconnection attempts
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('❌ Maximum reconnection attempts reached. Stopping reconnection.');
+      this.connectionError = 'Maximum reconnection attempts exceeded. Please check your internet connection.';
+      this.emit('connection:failed', { error: this.connectionError, attempts: this.reconnectAttempts });
+      return;
+    }
+
+    // Prevent too frequent connection attempts
+    const now = Date.now();
+    const timeSinceLastAttempt = now - this.lastConnectionAttempt;
+    const minInterval = 500; // Minimum 500ms between attempts
+    
+    if (timeSinceLastAttempt < minInterval) {
+      console.log('🔄 Connection attempt too soon, scheduling...');
+      setTimeout(() => this.connect(), minInterval - timeSinceLastAttempt);
+      return;
+    }
+
+    this.lastConnectionAttempt = now;
+    this.reconnectAttempts++;
+    
+    console.log(`🔌 Connecting to socket server... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
 
     this.socket = io(SOCKET_URL, {
       transports: ['websocket'],
-      reconnection: true,
-      reconnectionDelay: APP_CONFIG.SOCKET_RECONNECT_DELAY,
-      reconnectionAttempts: Infinity,
+      reconnection: false, // We'll handle reconnection manually
+      timeout: 10000, // 10 second timeout
+      forceNew: true,
     });
 
     this.setupEventHandlers();
@@ -46,10 +74,12 @@ class SocketService {
     if (!this.socket) return;
 
     this.socket.on('connect', () => {
-      console.log('✅ Socket connected');
+      console.log('✅ Socket connected successfully');
       this.isConnected = true;
+      this.reconnectAttempts = 0; // Reset on successful connection
+      this.connectionError = null;
       this.registerDevice();
-      this.emit('connected', { connected: true });
+      this.emit('connected', { connected: true, attempts: this.reconnectAttempts });
     });
 
     this.socket.on('disconnect', () => {
@@ -84,9 +114,26 @@ class SocketService {
       this.emit('request:sync', {});
     });
 
+    this.socket.on('connect_error', (error: any) => {
+      console.error('❌ Socket connection error:', error.message || error);
+      this.connectionError = error.message || 'Connection failed';
+      this.isConnected = false;
+      this.emit('connection:error', { error: this.connectionError, attempts: this.reconnectAttempts });
+      this.scheduleReconnect();
+    });
+
     this.socket.on('error', (data: any) => {
       console.error('❌ Socket error:', data);
-      this.emit('error', data);
+      this.connectionError = data.message || 'Socket error occurred';
+      this.emit('error', { error: data, attempts: this.reconnectAttempts });
+    });
+
+    // Handle connection timeout
+    this.socket.on('connect_timeout', () => {
+      console.error('⏱️ Socket connection timeout');
+      this.connectionError = 'Connection timeout';
+      this.emit('connection:timeout', { attempts: this.reconnectAttempts });
+      this.scheduleReconnect();
     });
   }
 
@@ -104,19 +151,37 @@ class SocketService {
   }
 
   /**
-   * Schedule reconnection
+   * Schedule reconnection with exponential backoff
    */
   private scheduleReconnect(): void {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
 
+    // Don't schedule if we've exceeded max attempts
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('❌ Maximum reconnection attempts reached');
+      return;
+    }
+
+    // Calculate delay using exponential backoff with jitter
+    const backoffDelay = Math.min(
+      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay
+    );
+    
+    // Add jitter to prevent thundering herd problem
+    const jitter = Math.random() * 0.3 * backoffDelay;
+    const delay = backoffDelay + jitter;
+
+    console.log(`🔄 Scheduling reconnection in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+
     this.reconnectTimer = setTimeout(() => {
       if (!this.isConnected) {
         console.log('🔄 Attempting to reconnect...');
         this.connect();
       }
-    }, APP_CONFIG.SOCKET_RECONNECT_DELAY);
+    }, delay);
   }
 
   /**
@@ -201,6 +266,37 @@ class SocketService {
    */
   get connected(): boolean {
     return this.isConnected;
+  }
+
+  /**
+   * Get connection status information
+   */
+  getConnectionStatus() {
+    return {
+      connected: this.isConnected,
+      reconnectAttempts: this.reconnectAttempts,
+      maxReconnectAttempts: this.maxReconnectAttempts,
+      connectionError: this.connectionError,
+      canRetry: this.reconnectAttempts < this.maxReconnectAttempts,
+    };
+  }
+
+  /**
+   * Manually retry connection (resets attempt counter)
+   */
+  retryConnection(): void {
+    console.log('🔄 Manual connection retry requested');
+    this.reconnectAttempts = 0;
+    this.connectionError = null;
+    
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    
+    if (!this.isConnected) {
+      this.connect();
+    }
   }
 
   /**
