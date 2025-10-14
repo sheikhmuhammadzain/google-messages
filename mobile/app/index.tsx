@@ -75,6 +75,13 @@ export default function InboxScreen() {
       loadConversations();
     });
 
+    const softSub = DeviceEventEmitter.addListener('conversation:softRead', (evt: { phoneNumber: string }) => {
+      console.log('[Inbox] conversation:softRead for', evt?.phoneNumber);
+      // Update UI counts in-place without forcing DB reload (fallback when not default SMS app)
+      setConversations(prev => prev.map(c => c.phoneNumber === evt.phoneNumber ? { ...c, unreadCount: 0 } : c));
+      setFilteredConversations(prev => prev.map(c => c.phoneNumber === evt.phoneNumber ? { ...c, unreadCount: 0 } : c));
+    });
+
     // Respond to server request:sync to push fresh state
     const onRequestSync = async () => {
       console.log('[Inbox] request:sync received - syncing conversations');
@@ -84,6 +91,7 @@ export default function InboxScreen() {
 
     return () => {
       sub.remove();
+      softSub.remove();
       socketService.off('request:sync', onRequestSync);
     };
   }, []);
