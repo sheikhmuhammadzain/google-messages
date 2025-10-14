@@ -112,7 +112,9 @@ export default function ChatScreen() {
     socketService.on('request:sync', handler);
     return () => socketService.off('request:sync', handler);
   }, []);
-    // Keyboard listeners (Android) to keep input above keyboard reliably
+
+  // Keyboard listeners (Android) to keep input above keyboard reliably
+  useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
       const height = e.endCoordinates?.height ?? 0;
       // Subtract bottom inset to avoid double spacing, then add a small buffer
@@ -127,7 +129,7 @@ export default function ChatScreen() {
       showSub.remove();
       hideSub.remove();
     };
-  }, [phoneNumber, insets?.bottom, permissions.hasSmsPermissions]);
+  }, [insets?.bottom]);
 
   const markConversationAsRead = async () => {
     try {
@@ -251,9 +253,9 @@ export default function ChatScreen() {
       if (updated) return next;
 
       // Fallback: try to match by content and timestamp proximity (if DB replaced the temp ID)
-      if (opts.body && opts.sentAt) {
+      if (opts.body && opts.sentAt !== undefined) {
         const PROXIMITY_MS = 15_000; // 15s window
-        const idx = next.findIndex(m => m.type === 'sent' && m.body === opts.body && Math.abs(m.timestamp - opts.sentAt) <= PROXIMITY_MS);
+        const idx = next.findIndex(m => m.type === 'sent' && m.body === opts.body && Math.abs(m.timestamp - opts.sentAt!) <= PROXIMITY_MS);
         if (idx !== -1) {
           const copy = [...next];
           copy[idx] = { ...copy[idx], status: opts.status };
