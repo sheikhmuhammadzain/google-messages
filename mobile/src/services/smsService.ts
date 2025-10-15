@@ -476,12 +476,13 @@ class SMSService {
         return;
       }
 
-      // Use native module to mark messages as read if available
-      if (EnhancedSmsManager && EnhancedSmsManager.markConversationAsRead) {
+      // Use SmsReadManager native module to mark messages as read
+      const { SmsReadManager } = NativeModules;
+      if (SmsReadManager && SmsReadManager.markConversationAsRead) {
         try {
-          console.log('[smsService] Using EnhancedSmsManager.markConversationAsRead');
+          console.log('[smsService] Using SmsReadManager.markConversationAsRead');
           console.log(`[smsService] Calling native method with phoneNumber: ${phoneNumber}`);
-          const result = await EnhancedSmsManager.markConversationAsRead(phoneNumber);
+          const result = await SmsReadManager.markConversationAsRead(phoneNumber);
           console.log(`[smsService] ✅ Native method returned: ${result} messages marked as read`);
           
           // Verify the changes by re-reading the conversation
@@ -496,17 +497,21 @@ class SMSService {
           }, 1000);
           
           return;
-        } catch (error) {
-          console.error('[smsService] EnhancedSmsManager failed:', error);
-          console.log('[smsService] Falling back to SmsAndroid method');
+        } catch (error: any) {
+          console.error('[smsService] SmsReadManager failed:', error);
+          
+          // Check if error is about not being default SMS app
+          if (error.message && error.message.includes('default SMS app')) {
+            console.warn('[smsService] App is not default SMS app - this is required on Android 15');
+            throw new Error('Cannot mark as read: Please set this app as your default SMS app in Android settings');
+          }
+          
+          throw error;
         }
       } else {
-        console.log('[smsService] EnhancedSmsManager not available, using fallback');
+        console.log('[smsService] SmsReadManager not available');
+        throw new Error('Cannot mark messages as read: Native module not available');
       }
-
-      // No fallback available - EnhancedSmsManager is the only method
-      console.log('[smsService] No fallback method available - EnhancedSmsManager is required');
-      throw new Error('Cannot mark messages as read: EnhancedSmsManager not available');
     } catch (error) {
       console.error('[smsService] ❌ Error in markAsRead:', error);
       throw error;
