@@ -319,12 +319,13 @@ export default function ChatScreen() {
     
     // Register status listener for this message
     smsService.registerStatusListener(messageId, (status, error) => {
-      console.log(`Message ${messageId} status:`, status, error);
+      console.log(`[Chat] Message ${messageId} status received:`, status, error);
       
       // Clear the timeout since we got a status update
       if (statusTimeout) {
         clearTimeout(statusTimeout);
         statusTimeout = null;
+        console.log(`[Chat] Cleared timeout for message ${messageId}`);
       }
       
       // Update status by ID, or fallback by content+time if DB replaced temp ID
@@ -338,7 +339,7 @@ export default function ChatScreen() {
       // Clear sending state when message is confirmed sent or failed
       if (status === 'sent' || status === 'delivered' || status === 'failed') {
         setIsSending(false);
-        console.log('Message status updated, isSending set to false');
+        console.log(`[Chat] Message ${messageId} status updated to ${status}, isSending set to false`);
       }
       
       // Clean up listener after delivery or failure
@@ -366,9 +367,18 @@ export default function ChatScreen() {
 
       // Set a timeout to clear sending state if no status update comes through
       statusTimeout = setTimeout(() => {
+        console.log(`[Chat] Timeout reached for message ${messageId} - no status update received, marking as sent`);
+        
+        // Mark message as sent as fallback
+        updateMessageStatusLocal({ id: messageId, body: textToSend, sentAt: tempMessage.timestamp, status: 'sent' });
+        
+        // Clear sending state
         setIsSending(false);
-        console.log('Sending state cleared by timeout - no status update received');
-      }, 3000); // 3 second timeout
+        console.log(`[Chat] Message ${messageId} marked as sent by timeout, isSending set to false`);
+        
+        // Clean up listener
+        setTimeout(() => smsService.unregisterStatusListener(messageId), 1000);
+      }, 5000); // 5 second timeout
 
       // Notify socket
       socketService.updateMessageStatus(messageId, 'sent');

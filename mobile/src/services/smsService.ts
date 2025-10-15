@@ -21,39 +21,56 @@ class SMSService {
    * Setup event listeners for SMS status updates
    */
   private setupEventListeners() {
-    if (!this.eventEmitter) return;
+    if (!this.eventEmitter) {
+      console.log('[smsService] No event emitter available for status updates');
+      return;
+    }
+
+    console.log('[smsService] Setting up SMS status event listeners...');
 
     // Listen for SMS sent status
     this.eventEmitter.addListener('onSmsSent', (data: any) => {
-      console.log('SMS sent status:', data);
+      console.log('[smsService] SMS sent status received:', data);
       const listener = this.smsStatusListeners.get(data.messageId);
       if (listener) {
+        console.log(`[smsService] Calling status listener for messageId: ${data.messageId}, status: ${data.status}`);
         listener(data.status, data.error);
+      } else {
+        console.warn(`[smsService] No listener found for messageId: ${data.messageId}`);
       }
     });
 
     // Listen for SMS delivered status
     this.eventEmitter.addListener('onSmsDelivered', (data: any) => {
-      console.log('SMS delivered status:', data);
+      console.log('[smsService] SMS delivered status received:', data);
       const listener = this.smsStatusListeners.get(data.messageId);
       if (listener) {
+        console.log(`[smsService] Calling status listener for messageId: ${data.messageId}, status: ${data.status}`);
         listener(data.status, data.error);
+      } else {
+        console.warn(`[smsService] No listener found for messageId: ${data.messageId}`);
       }
     });
+
+    console.log('[smsService] SMS status event listeners set up successfully');
   }
 
   /**
    * Register a listener for message status updates
    */
   registerStatusListener(messageId: string, callback: (status: string, error?: string) => void) {
+    console.log(`[smsService] Registering status listener for messageId: ${messageId}`);
     this.smsStatusListeners.set(messageId, callback);
+    console.log(`[smsService] Total registered listeners: ${this.smsStatusListeners.size}`);
   }
 
   /**
    * Unregister a status listener
    */
   unregisterStatusListener(messageId: string) {
+    console.log(`[smsService] Unregistering status listener for messageId: ${messageId}`);
     this.smsStatusListeners.delete(messageId);
+    console.log(`[smsService] Total registered listeners: ${this.smsStatusListeners.size}`);
   }
 
   /**
