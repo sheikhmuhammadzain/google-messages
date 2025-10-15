@@ -37,8 +37,8 @@ export default function ChatScreen() {
   const [nowTick, setNowTick] = useState(Date.now());
   const insets = useSafeAreaInsets();
   const [keyboardOffset, setKeyboardOffset] = useState(0);
-  // Extra padding to keep the input slightly above the keyboard on Android
-  const KEYBOARD_EXTRA_OFFSET = 12;
+  // Extra padding to keep the input clearly above the keyboard on Android
+  const KEYBOARD_EXTRA_OFFSET = 32;
 
   // Handle incoming SMS messages in real-time
   useSmsListener({
@@ -121,19 +121,22 @@ export default function ChatScreen() {
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
       const height = e.endCoordinates?.height ?? 0;
-      // Subtract bottom inset to avoid double spacing, then add a small buffer
-      const offset = Math.max(height - (insets?.bottom ?? 0), 0) + KEYBOARD_EXTRA_OFFSET;
+      // Calculate offset to keep input clearly visible above keyboard
+      // Add extra padding for better visibility and send button access
+      const offset = height + KEYBOARD_EXTRA_OFFSET;
       setKeyboardOffset(offset);
+      console.log(`[Chat] Keyboard shown: height=${height}, offset=${offset}`);
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardOffset(0);
+      console.log('[Chat] Keyboard hidden, offset reset to 0');
     });
 
     return () => {
       showSub.remove();
       hideSub.remove();
     };
-  }, [insets?.bottom]);
+  }, []);
 
   const markConversationAsRead = async () => {
     try {
@@ -548,10 +551,12 @@ export default function ChatScreen() {
           // Keyboard-aware scroll view props
           enableOnAndroid={true}
           enableAutomaticScroll={true}
-          // Slightly larger extra scroll to keep last message and input visible above keyboard
-          extraScrollHeight={32}
+          // Larger extra scroll to keep last message and input clearly visible above keyboard
+          extraScrollHeight={64}
           keyboardOpeningTime={0}
           keyboardShouldPersistTaps="handled"
+          // Additional props for better keyboard handling
+          extraHeight={16}
           // Auto-scroll behavior
           onContentSizeChange={() => {
             // Auto-scroll to bottom when new messages arrive
@@ -646,25 +651,33 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     backgroundColor: COLORS.background,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
-    elevation: 4,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    // Ensure input container stays above keyboard
+    zIndex: 1000,
   },
   inputWrapper: {
     flex: 1,
     backgroundColor: COLORS.surfaceVariant,
     borderRadius: 24,
-    marginRight: 4,
-    minHeight: 44,
+    marginRight: 8,
+    minHeight: 48,
     maxHeight: 120,
     justifyContent: 'center',
+    // Ensure input wrapper is clearly visible
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   input: {
     backgroundColor: 'transparent',
@@ -674,5 +687,10 @@ const styles = StyleSheet.create({
   },
   sendButtonActive: {
     backgroundColor: COLORS.primaryLight,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
 });
