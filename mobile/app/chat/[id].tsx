@@ -178,6 +178,16 @@ export default function ChatScreen() {
         DeviceEventEmitter.emit('conversation:read', { phoneNumber });
         console.log('[Chat] Also emitted read event (DB confirmed)');
       }
+
+      // Force refresh conversations to sync with Google Messages
+      setTimeout(async () => {
+        try {
+          console.log('[Chat] Force refreshing conversations to sync with Google Messages...');
+          await smsService.forceRefreshConversations();
+        } catch (refreshError) {
+          console.error('[Chat] Error force refreshing conversations:', refreshError);
+        }
+      }, 2000);
     } catch (error) {
       console.error('[Chat] Error marking conversation as read:', error);
       // On error, still soft-update UI to avoid stale badge

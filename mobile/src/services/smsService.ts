@@ -439,6 +439,14 @@ class SMSService {
     try {
       console.log(`[smsService] markAsRead: Starting for ${phoneNumber}`);
       
+      // Check permissions first
+      const hasPerms = await this.hasPermissions();
+      if (!hasPerms) {
+        console.error('[smsService] markAsRead: No SMS permissions');
+        throw new Error('SMS permissions not granted');
+      }
+      console.log('[smsService] markAsRead: SMS permissions verified');
+      
       // First, get all unread messages from this phone number
       const messages = await this.readConversationMessages(phoneNumber);
       console.log(`[smsService] Found ${messages.length} total messages`);
@@ -455,55 +463,57 @@ class SMSService {
       if (EnhancedSmsManager && EnhancedSmsManager.markConversationAsRead) {
         try {
           console.log('[smsService] Using EnhancedSmsManager.markConversationAsRead');
+          console.log(`[smsService] Calling native method with phoneNumber: ${phoneNumber}`);
           const result = await EnhancedSmsManager.markConversationAsRead(phoneNumber);
-          console.log(`[smsService] ✅ Marked ${result} messages as read via native method`);
+          console.log(`[smsService] ✅ Native method returned: ${result} messages marked as read`);
+          
+          // Verify the changes by re-reading the conversation
+          setTimeout(async () => {
+            try {
+              const verifyMessages = await this.readConversationMessages(phoneNumber);
+              const stillUnread = verifyMessages.filter(msg => !msg.read && msg.type === 'received');
+              console.log(`[smsService] Verification: ${stillUnread.length} messages still unread after marking as read`);
+            } catch (verifyError) {
+              console.error('[smsService] Verification failed:', verifyError);
+            }
+          }, 1000);
+          
           return;
         } catch (error) {
-          console.log('[smsService] EnhancedSmsManager failed, using fallback:', error);
+          console.error('[smsService] EnhancedSmsManager failed:', error);
+          console.log('[smsService] Falling back to SmsAndroid method');
         }
       } else {
         console.log('[smsService] EnhancedSmsManager not available, using fallback');
       }
 
-      // Fallback: Use SmsAndroid to mark individual messages as read
-      console.log('[smsService] Using SmsAndroid fallback method');
-      let markedCount = 0;
-      
-      for (const message of unreadMessages) {
-        try {
-          await new Promise<void>((resolve) => {
-            // Ensure we pass a numeric ID where supported (some devices expect number)
-            const numericId = Number(message.id);
-            const idToUse: any = Number.isNaN(numericId) ? message.id : numericId;
-
-            try {
-              SmsAndroid.markAsRead(
-                idToUse,
-                (fail: string) => {
-                  console.error(`[smsService] Failed to mark message ${message.id}:`, fail);
-                  // Don't reject, continue with other messages
-                  resolve();
-                },
-                (success: string) => {
-                  console.log(`[smsService] ✓ Marked message ${message.id} as read`);
-                  markedCount++;
-                  resolve();
-                }
-              );
-            } catch (innerErr) {
-              console.error(`[smsService] markAsRead call threw for ${message.id}:`, innerErr);
-              resolve();
-            }
-          });
-        } catch (error) {
-          console.error(`[smsService] Error marking message ${message.id}:`, error);
-        }
-      }
-      
-      console.log(`[smsService] ✅ Successfully marked ${markedCount}/${unreadMessages.length} messages as read for ${phoneNumber}`);
+      // No fallback available - EnhancedSmsManager is the only method
+      console.log('[smsService] No fallback method available - EnhancedSmsManager is required');
+      throw new Error('Cannot mark messages as read: EnhancedSmsManager not available');
     } catch (error) {
       console.error('[smsService] ❌ Error in markAsRead:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Force refresh conversations to sync with Google Messages
+   * This can be called after marking as read to ensure Google Messages updates
+   */
+  async forceRefreshConversations(): Promise<Conversation[]> {
+    try {
+      console.log('[smsService] Force refreshing conversations to sync with Google Messages...');
+      
+      // Add a small delay to allow Google Messages to process the changes
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const conversations = await this.getConversations();
+      console.log(`[smsService] Refreshed ${conversations.length} conversations`);
+      
+      return conversations;
+    } catch (error) {
+      console.error('[smsService] Error force refreshing conversations:', error);
+      return [];
     }
   }
 

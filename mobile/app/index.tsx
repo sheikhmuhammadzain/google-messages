@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, FlatList, StyleSheet, RefreshControl, TouchableOpacity } from 'react-native';
+import { View, FlatList, StyleSheet, RefreshControl, TouchableOpacity, AppState } from 'react-native';
 import { FAB, Searchbar, Text, ActivityIndicator, IconButton } from 'react-native-paper';
 import { useRouter, useFocusEffect } from 'expo-router';
 import ConversationItem from '../src/components/ConversationItem';
@@ -29,7 +29,7 @@ export default function InboxScreen() {
 
   // Handle incoming SMS messages in real-time
   useSmsListener({
-    onSmsReceived: useCallback((event) => {
+    onSmsReceived: useCallback((event: any) => {
       console.log('New SMS received in inbox:', event.phoneNumber);
       // Reload conversations to show new message
       loadConversations();
@@ -49,6 +49,39 @@ export default function InboxScreen() {
       }
     }, [permissions.hasSmsPermissions])
   );
+
+  // Listen for app state changes to detect when returning from Google Messages
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      if (nextAppState === 'active' && permissions.hasSmsPermissions) {
+        console.log('[Inbox] App became active, refreshing conversations to sync with Google Messages...');
+        // Longer delay to ensure Google Messages has updated the SMS database
+        setTimeout(() => {
+          loadConversations();
+        }, 1000);
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription?.remove();
+    };
+  }, [permissions.hasSmsPermissions]);
+
+  // Periodic refresh to sync with Google Messages changes
+  useEffect(() => {
+    if (!permissions.hasSmsPermissions) return;
+
+    const interval = setInterval(() => {
+      console.log('[Inbox] Periodic refresh to sync with Google Messages...');
+      loadConversations();
+    }, 30000); // Refresh every 30 seconds
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [permissions.hasSmsPermissions]);
 
   useEffect(() => {
     if (permissions.hasSmsPermissions) {
@@ -156,6 +189,21 @@ export default function InboxScreen() {
     setIsRefreshing(false);
   };
 
+  const handleSyncWithGoogleMessages = async () => {
+    setIsRefreshing(true);
+    try {
+      console.log('[Inbox] Manual sync with Google Messages...');
+      // Force refresh conversations to sync with Google Messages
+      await smsService.forceRefreshConversations();
+      await loadConversations();
+      console.log('[Inbox] Manual sync completed');
+    } catch (error) {
+      console.error('Error syncing with Google Messages:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const filterConversations = () => {
     if (!searchQuery.trim()) {
       setFilteredConversations(conversations);
@@ -250,6 +298,20 @@ export default function InboxScreen() {
           inputStyle={styles.searchInput}
           elevation={0}
         />
+        <IconButton
+          icon="refresh"
+          size={24}
+          iconColor={COLORS.primary}
+          onPress={handleRefresh}
+          style={styles.refreshButton}
+        />
+        <IconButton
+          icon="sync"
+          size={24}
+          iconColor={COLORS.accent}
+          onPress={handleSyncWithGoogleMessages}
+          style={styles.syncButton}
+        />
       </View>
       
       <FlatList
@@ -291,11 +353,25 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   searchbar: {
     backgroundColor: COLORS.surfaceVariant,
     borderRadius: 28,
     elevation: 0,
+    flex: 1,
+    marginRight: 8,
+  },
+  refreshButton: {
+    backgroundColor: COLORS.surfaceVariant,
+    borderRadius: 20,
+    elevation: 1,
+  },
+  syncButton: {
+    backgroundColor: COLORS.surfaceVariant,
+    borderRadius: 20,
+    elevation: 1,
   },
   searchInput: {
     fontSize: 15,
