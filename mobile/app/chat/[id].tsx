@@ -89,6 +89,10 @@ export default function ChatScreen() {
       loadContactInfo();
       loadSimInfo();
       
+      // Immediately emit softRead event to clear badge in UI
+      DeviceEventEmitter.emit('conversation:softRead', { phoneNumber });
+      console.log('[Chat] Emitted immediate softRead event');
+      
       // Mark conversation as read after a short delay (to ensure messages are loaded)
       setTimeout(() => {
         markConversationAsRead();
@@ -137,6 +141,7 @@ export default function ChatScreen() {
 
       // Snapshot current unread count locally
       const unreadBefore = messages.filter(m => m.type === 'received' && !m.read).length;
+      console.log(`[Chat] Found ${unreadBefore} unread messages locally`);
 
       // Mark messages as read in database
       await smsService.markAsRead(phoneNumber);
@@ -151,6 +156,7 @@ export default function ChatScreen() {
         const convs = await smsService.getConversations();
         const conv = convs.find(c => c.phoneNumber === phoneNumber);
         clearedViaDb = !conv || conv.unreadCount === 0;
+        console.log(`[Chat] DB verification: conversation found=${!!conv}, unreadCount=${conv?.unreadCount || 0}, clearedViaDb=${clearedViaDb}`);
 
         // Sync to web regardless
         if (socketService.connected) {
@@ -160,19 +166,20 @@ export default function ChatScreen() {
         console.log('[Chat] Could not fetch conversations after mark-as-read:', e);
       }
 
+      // Always emit softRead event as primary method to ensure UI updates
+      DeviceEventEmitter.emit('conversation:softRead', { phoneNumber });
+      console.log('[Chat] Emitted softRead event (primary)');
+
+      // Also emit read event if DB was successfully cleared
       if (clearedViaDb) {
-        // Emit standard read event so inbox can reload
         DeviceEventEmitter.emit('conversation:read', { phoneNumber });
-        console.log('[Chat] Mark as read complete via DB');
-      } else {
-        // Fallback: emit a softRead event to update UI immediately even if DB didn’t change (e.g., not default SMS app)
-        DeviceEventEmitter.emit('conversation:softRead', { phoneNumber });
-        console.log('[Chat] Emitted softRead fallback event');
+        console.log('[Chat] Also emitted read event (DB confirmed)');
       }
     } catch (error) {
       console.error('[Chat] Error marking conversation as read:', error);
       // On error, still soft-update UI to avoid stale badge
       DeviceEventEmitter.emit('conversation:softRead', { phoneNumber });
+      console.log('[Chat] Emitted softRead event (error fallback)');
     }
   };
 

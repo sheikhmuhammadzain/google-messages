@@ -78,7 +78,16 @@ export default function InboxScreen() {
     const softSub = DeviceEventEmitter.addListener('conversation:softRead', (evt: { phoneNumber: string }) => {
       console.log('[Inbox] conversation:softRead for', evt?.phoneNumber);
       // Update UI counts in-place without forcing DB reload (fallback when not default SMS app)
-      setConversations(prev => prev.map(c => c.phoneNumber === evt.phoneNumber ? { ...c, unreadCount: 0 } : c));
+      setConversations(prev => {
+        const updated = prev.map(c => {
+          if (c.phoneNumber === evt.phoneNumber) {
+            console.log(`[Inbox] Clearing unread count for ${c.phoneNumber}: ${c.unreadCount} -> 0`);
+            return { ...c, unreadCount: 0 };
+          }
+          return c;
+        });
+        return updated;
+      });
       setFilteredConversations(prev => prev.map(c => c.phoneNumber === evt.phoneNumber ? { ...c, unreadCount: 0 } : c));
     });
 
