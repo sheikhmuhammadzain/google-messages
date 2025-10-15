@@ -294,9 +294,18 @@ export default function ChatScreen() {
       flatListRef.current?.scrollToEnd?.({ animated: true });
     }, 150);
 
+    // Store timeout reference to clear it when status updates
+    let statusTimeout: ReturnType<typeof setTimeout> | null = null;
+    
     // Register status listener for this message
     smsService.registerStatusListener(messageId, (status, error) => {
       console.log(`Message ${messageId} status:`, status, error);
+      
+      // Clear the timeout since we got a status update
+      if (statusTimeout) {
+        clearTimeout(statusTimeout);
+        statusTimeout = null;
+      }
       
       // Update status by ID, or fallback by content+time if DB replaced temp ID
       updateMessageStatusLocal({ id: messageId, body: textToSend, sentAt: tempMessage.timestamp, status: status === 'failed' ? 'failed' : (status === 'delivered' ? 'delivered' : 'sent') });
@@ -335,13 +344,11 @@ export default function ChatScreen() {
       // Initial status update (actual status may also come from broadcast receiver)
       updateMessageStatusLocal({ id: messageId, body: textToSend, sentAt: tempMessage.timestamp, status: 'sent' });
 
-      // Ensure UI doesn't stay in sending state if sent broadcast is delayed
-      setIsSending(false);
-
-      // As a safety net, re-apply status shortly after to force re-render if needed
-      setTimeout(() => {
-        updateMessageStatusLocal({ id: messageId, body: textToSend, sentAt: tempMessage.timestamp, status: 'sent' });
-      }, 400);
+      // Set a timeout to clear sending state if no status update comes through
+      statusTimeout = setTimeout(() => {
+        setIsSending(false);
+        console.log('Sending state cleared by timeout - no status update received');
+      }, 3000); // 3 second timeout
 
       // Notify socket
       socketService.updateMessageStatus(messageId, 'sent');
@@ -354,6 +361,12 @@ export default function ChatScreen() {
       }, 800);
     } catch (error: any) {
       console.error('Error sending message:', error);
+      
+      // Clear the timeout since we got an error
+      if (statusTimeout) {
+        clearTimeout(statusTimeout);
+        statusTimeout = null;
+      }
       
       const errorMessage = error?.message || 'Failed to send message. Please try again.';
       
