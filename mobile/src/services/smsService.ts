@@ -86,6 +86,7 @@ class SMSService {
         PermissionsAndroid.PERMISSIONS.READ_SMS,
         PermissionsAndroid.PERMISSIONS.SEND_SMS,
         PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+        PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
       ];
 
       const granted = await PermissionsAndroid.requestMultiple(permissions);
@@ -93,7 +94,8 @@ class SMSService {
       return (
         granted['android.permission.READ_SMS'] === PermissionsAndroid.RESULTS.GRANTED &&
         granted['android.permission.SEND_SMS'] === PermissionsAndroid.RESULTS.GRANTED &&
-        granted['android.permission.RECEIVE_SMS'] === PermissionsAndroid.RESULTS.GRANTED
+        granted['android.permission.RECEIVE_SMS'] === PermissionsAndroid.RESULTS.GRANTED &&
+        granted['android.permission.READ_PHONE_STATE'] === PermissionsAndroid.RESULTS.GRANTED
       );
     } catch (error) {
       console.error('Error requesting SMS permissions:', error);
@@ -112,7 +114,8 @@ class SMSService {
     try {
       const readSms = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
       const sendSms = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.SEND_SMS);
-      return readSms && sendSms;
+      const readPhoneState = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE);
+      return readSms && sendSms && readPhoneState;
     } catch (error) {
       console.error('Error checking SMS permissions:', error);
       return false;
