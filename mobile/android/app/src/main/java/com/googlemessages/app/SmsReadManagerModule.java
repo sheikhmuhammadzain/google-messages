@@ -29,14 +29,14 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
 
     /**
      * Mark all messages from a specific phone number as read
-     * Android 15 requires the app to be the default SMS app for this to work
+     * Requires the app to be the default SMS app on Android 4.4+
      */
     @ReactMethod
     public void markConversationAsRead(String phoneNumber, Promise promise) {
         try {
             Log.d(TAG, "Starting markConversationAsRead for: " + phoneNumber);
             
-            // Verify app is default SMS app (required for Android 15)
+            // FAIL FAST: Verify app is default SMS app (required for Android 4.4+)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                 String defaultSmsPackage = Telephony.Sms.getDefaultSmsPackage(reactContext);
                 String ourPackage = reactContext.getPackageName();
@@ -45,42 +45,53 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
                 Log.d(TAG, "Our package: " + ourPackage);
                 
                 if (!ourPackage.equals(defaultSmsPackage)) {
-                    Log.w(TAG, "App is not default SMS app - marking as read may fail on Android 15");
-                    // Continue anyway - may still work with WRITE_SMS permission
+                    String errorMsg = "App is not the default SMS app. Cannot mark messages as read. Current default: " + defaultSmsPackage;
+                    Log.e(TAG, errorMsg);
+                    promise.reject("NOT_DEFAULT_SMS_APP", errorMsg);
+                    return;
                 }
             }
             
             ContentResolver contentResolver = reactContext.getContentResolver();
             
+            // Use proper Telephony.Sms.Inbox URI
+            Uri uri = Telephony.Sms.Inbox.CONTENT_URI;
+            
             // Normalize phone number (remove spaces, dashes, parentheses)
             String normalizedNumber = phoneNumber.replaceAll("[\\s\\-()]", "");
             Log.d(TAG, "Normalized number: " + normalizedNumber);
-            
-            // Query for unread messages from this phone number
-            Uri uri = Uri.parse("content://sms/inbox");
-            String selection = "address = ? AND read = ?";
-            String[] selectionArgs = new String[]{phoneNumber, "0"};
-            
-            // Also try with normalized number
-            String selectionMulti = "(address = ? OR address = ?) AND read = ?";
-            String[] selectionArgsMulti = new String[]{phoneNumber, normalizedNumber, "0"};
             
             Cursor cursor = null;
             int markedCount = 0;
             
             try {
-                // First, count how many unread messages we have
+                // STEP 1: Get the thread_id for this phone number
+                // thread_id is more reliable than address for marking conversations
+                Long threadId = getThreadIdForPhoneNumber(phoneNumber, normalizedNumber);
+                
+                if (threadId == null) {
+                    Log.w(TAG, "No thread found for phone number: " + phoneNumber);
+                    promise.resolve(0);
+                    return;
+                }
+                
+                Log.d(TAG, "Found thread_id: " + threadId + " for " + phoneNumber);
+                
+                // STEP 2: Count unread messages in this thread
+                String selection = "thread_id = ? AND read = ?";
+                String[] selectionArgs = new String[]{String.valueOf(threadId), "0"};
+                
                 cursor = contentResolver.query(
                     uri,
-                    new String[]{"_id", "address", "read"},
-                    selectionMulti,
-                    selectionArgsMulti,
+                    new String[]{"_id", "address", "read", "thread_id"},
+                    selection,
+                    selectionArgs,
                     null
                 );
                 
                 if (cursor != null) {
                     int totalUnread = cursor.getCount();
-                    Log.d(TAG, "Found " + totalUnread + " unread messages from " + phoneNumber);
+                    Log.d(TAG, "Found " + totalUnread + " unread messages in thread " + threadId);
                     
                     if (totalUnread == 0) {
                         Log.d(TAG, "No unread messages to mark as read");
@@ -90,33 +101,36 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
                     }
                     
                     cursor.close();
+                    cursor = null;
                 }
                 
-                // Now mark them as read using ContentValues
+                // STEP 3: Mark all messages in thread as read using thread_id
                 ContentValues values = new ContentValues();
-                values.put("read", 1); // 1 = read, 0 = unread
-                values.put("seen", 1); // Also mark as seen
+                values.put(Telephony.Sms.Inbox.READ, 1); // 1 = read
+                values.put(Telephony.Sms.Inbox.SEEN, 1); // Also mark as seen
                 
-                // Update all matching messages in one call (more efficient)
+                // Update by thread_id - more reliable than address
+                selection = "thread_id = ?";
+                selectionArgs = new String[]{String.valueOf(threadId)};
+                
                 int updatedRows = contentResolver.update(
                     uri,
                     values,
-                    selectionMulti,
-                    selectionArgsMulti
+                    selection,
+                    selectionArgs
                 );
                 
-                Log.d(TAG, "✅ Successfully marked " + updatedRows + " messages as read");
+                Log.d(TAG, "✅ Successfully marked " + updatedRows + " messages as read in thread " + threadId);
                 markedCount = updatedRows;
                 
-                // For Android 15, also notify the system that SMS database changed
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                    contentResolver.notifyChange(uri, null);
-                    Log.d(TAG, "Notified system of SMS database change (Android 15)");
-                }
+                // ALWAYS notify the system that SMS database changed (all Android versions)
+                contentResolver.notifyChange(uri, null);
+                Log.d(TAG, "Notified system of SMS database change");
                 
             } catch (SecurityException e) {
-                Log.e(TAG, "SecurityException - App may not be default SMS app", e);
-                throw new Exception("Cannot mark as read: App must be set as default SMS app. " + e.getMessage());
+                Log.e(TAG, "SecurityException - App is not default SMS app", e);
+                promise.reject("SECURITY_ERROR", "Cannot mark as read: App must be set as default SMS app. " + e.getMessage());
+                return;
             } catch (Exception e) {
                 Log.e(TAG, "Error marking messages as read", e);
                 throw e;
@@ -126,7 +140,7 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
                 }
             }
             
-            // Wait for database to update (Android 15 sync delay)
+            // Wait for database to update
             try {
                 Thread.sleep(300);
             } catch (InterruptedException e) {
@@ -134,7 +148,9 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
             }
             
             // Verify the changes
-            verifyReadStatus(phoneNumber, normalizedNumber);
+            if (markedCount > 0) {
+                verifyReadStatusByThreadId(getThreadIdForPhoneNumber(phoneNumber, normalizedNumber));
+            }
             
             promise.resolve(markedCount);
             
@@ -143,21 +159,66 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
             promise.reject("MARK_AS_READ_FAILED", e.getMessage(), e);
         }
     }
+    
+    /**
+     * Get thread_id for a phone number
+     * Returns null if no thread found
+     */
+    private Long getThreadIdForPhoneNumber(String phoneNumber, String normalizedNumber) {
+        ContentResolver contentResolver = reactContext.getContentResolver();
+        Uri uri = Telephony.Sms.CONTENT_URI;
+        
+        String selection = "address = ? OR address = ?";
+        String[] selectionArgs = new String[]{phoneNumber, normalizedNumber};
+        
+        Cursor cursor = null;
+        try {
+            cursor = contentResolver.query(
+                uri,
+                new String[]{"thread_id"},
+                selection,
+                selectionArgs,
+                "date DESC LIMIT 1"
+            );
+            
+            if (cursor != null && cursor.moveToFirst()) {
+                int threadIdIndex = cursor.getColumnIndex("thread_id");
+                if (threadIdIndex >= 0) {
+                    long threadId = cursor.getLong(threadIdIndex);
+                    cursor.close();
+                    return threadId;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting thread_id for phone number", e);
+        } finally {
+            if (cursor != null && !cursor.isClosed()) {
+                cursor.close();
+            }
+        }
+        
+        return null;
+    }
 
     /**
-     * Verify that messages were actually marked as read
+     * Verify that messages were actually marked as read using thread_id
      */
-    private void verifyReadStatus(String phoneNumber, String normalizedNumber) {
+    private void verifyReadStatusByThreadId(Long threadId) {
+        if (threadId == null) {
+            Log.w(TAG, "Cannot verify - threadId is null");
+            return;
+        }
+        
         try {
             ContentResolver contentResolver = reactContext.getContentResolver();
-            Uri uri = Uri.parse("content://sms/inbox");
+            Uri uri = Telephony.Sms.Inbox.CONTENT_URI;
             
-            String selection = "(address = ? OR address = ?) AND read = ?";
-            String[] selectionArgs = new String[]{phoneNumber, normalizedNumber, "0"};
+            String selection = "thread_id = ? AND read = ?";
+            String[] selectionArgs = new String[]{String.valueOf(threadId), "0"};
             
             Cursor cursor = contentResolver.query(
                 uri,
-                new String[]{"_id", "address", "read"},
+                new String[]{"_id", "address", "read", "thread_id"},
                 selection,
                 selectionArgs,
                 null
@@ -166,9 +227,9 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
             if (cursor != null) {
                 int stillUnread = cursor.getCount();
                 if (stillUnread > 0) {
-                    Log.w(TAG, "⚠️ Verification: " + stillUnread + " messages still unread after marking");
+                    Log.w(TAG, "⚠️ Verification: " + stillUnread + " messages still unread in thread " + threadId);
                 } else {
-                    Log.d(TAG, "✅ Verification: All messages successfully marked as read");
+                    Log.d(TAG, "✅ Verification: All messages in thread " + threadId + " successfully marked as read");
                 }
                 cursor.close();
             }
@@ -185,12 +246,25 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
         try {
             Log.d(TAG, "Marking message as read by ID: " + messageId);
             
+            // FAIL FAST: Check if default SMS app
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                String defaultSmsPackage = Telephony.Sms.getDefaultSmsPackage(reactContext);
+                String ourPackage = reactContext.getPackageName();
+                
+                if (!ourPackage.equals(defaultSmsPackage)) {
+                    String errorMsg = "App is not the default SMS app. Cannot mark message as read.";
+                    Log.e(TAG, errorMsg);
+                    promise.reject("NOT_DEFAULT_SMS_APP", errorMsg);
+                    return;
+                }
+            }
+            
             ContentResolver contentResolver = reactContext.getContentResolver();
-            Uri uri = Uri.parse("content://sms");
+            Uri uri = Telephony.Sms.CONTENT_URI;
             
             ContentValues values = new ContentValues();
-            values.put("read", 1);
-            values.put("seen", 1);
+            values.put(Telephony.Sms.READ, 1);
+            values.put(Telephony.Sms.SEEN, 1);
             
             String selection = "_id = ?";
             String[] selectionArgs = new String[]{messageId};
@@ -200,10 +274,9 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
             if (updatedRows > 0) {
                 Log.d(TAG, "✅ Message " + messageId + " marked as read");
                 
-                // Notify system of change (Android 15)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                    contentResolver.notifyChange(uri, null);
-                }
+                // ALWAYS notify system of change
+                contentResolver.notifyChange(uri, null);
+                Log.d(TAG, "Notified system of SMS database change");
                 
                 promise.resolve(true);
             } else {
@@ -211,6 +284,9 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
                 promise.resolve(false);
             }
             
+        } catch (SecurityException e) {
+            Log.e(TAG, "SecurityException - App is not default SMS app", e);
+            promise.reject("SECURITY_ERROR", "Cannot mark as read: App must be set as default SMS app. " + e.getMessage());
         } catch (Exception e) {
             Log.e(TAG, "Failed to mark message as read by ID", e);
             promise.reject("MARK_AS_READ_FAILED", e.getMessage(), e);
@@ -224,24 +300,32 @@ public class SmsReadManagerModule extends ReactContextBaseJavaModule {
     public void getUnreadCount(String phoneNumber, Promise promise) {
         try {
             ContentResolver contentResolver = reactContext.getContentResolver();
-            Uri uri = Uri.parse("content://sms/inbox");
+            Uri uri = Telephony.Sms.Inbox.CONTENT_URI;
             
             String normalizedNumber = phoneNumber.replaceAll("[\\s\\-()]", "");
-            String selection = "(address = ? OR address = ?) AND read = ?";
-            String[] selectionArgs = new String[]{phoneNumber, normalizedNumber, "0"};
             
-            Cursor cursor = contentResolver.query(
-                uri,
-                new String[]{"_id"},
-                selection,
-                selectionArgs,
-                null
-            );
+            // Get thread_id for more reliable querying
+            Long threadId = getThreadIdForPhoneNumber(phoneNumber, normalizedNumber);
             
             int unreadCount = 0;
-            if (cursor != null) {
-                unreadCount = cursor.getCount();
-                cursor.close();
+            
+            if (threadId != null) {
+                // Query by thread_id
+                String selection = "thread_id = ? AND read = ?";
+                String[] selectionArgs = new String[]{String.valueOf(threadId), "0"};
+                
+                Cursor cursor = contentResolver.query(
+                    uri,
+                    new String[]{"_id"},
+                    selection,
+                    selectionArgs,
+                    null
+                );
+                
+                if (cursor != null) {
+                    unreadCount = cursor.getCount();
+                    cursor.close();
+                }
             }
             
             Log.d(TAG, "Unread count for " + phoneNumber + ": " + unreadCount);

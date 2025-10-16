@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform, Image, Animated } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, Image, Animated, Pressable } from 'react-native';
 import { Text } from 'react-native-paper';
 import { Conversation } from '../types';
 import { formatConversationTime } from '../utils/dateUtils';
@@ -67,12 +67,15 @@ export default function ConversationItem({ conversation, onPress }: Props) {
 
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-      <TouchableOpacity 
+      <Pressable 
         style={[styles.container, unreadCount > 0 && styles.unreadContainer]} 
         onPress={() => onPress(conversation)}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        activeOpacity={1}
+        android_ripple={{
+          color: COLORS.primaryLight,
+          borderless: false,
+        }}
       >
       <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
         {contactPhoto ? (
@@ -114,7 +117,7 @@ export default function ConversationItem({ conversation, onPress }: Props) {
           </View>
         </View>
       )}
-      </TouchableOpacity>
+      </Pressable>
     </Animated.View>
   );
 }
@@ -123,23 +126,25 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.md,
+    paddingVertical: SPACING.md + 2,
     paddingHorizontal: SPACING.md,
     backgroundColor: COLORS.background,
-    minHeight: 80,
-    borderBottomWidth: 1,
+    minHeight: 84,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.borderLight,
   },
   unreadContainer: {
     backgroundColor: COLORS.primaryContainer,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.primary,
   },
   avatar: {
-    width: 52,
-    height: 52,
+    width: 56,
+    height: 56,
     borderRadius: RADIUS.full,
     justifyContent: 'center',
     alignItems: 'center',
-    ...ELEVATION.level1,
+    ...ELEVATION.level2,
   },
   avatarText: {
     color: COLORS.textInverse,
@@ -147,8 +152,8 @@ const styles = StyleSheet.create({
     fontWeight: '600' as any,
   },
   avatarImage: {
-    width: 52,
-    height: 52,
+    width: 56,
+    height: 56,
     borderRadius: RADIUS.full,
   },
   content: {
@@ -202,14 +207,14 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   badge: {
-    minWidth: 24,
-    height: 24,
+    minWidth: 26,
+    height: 26,
     borderRadius: RADIUS.full,
     backgroundColor: COLORS.badge,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xs,
-    ...ELEVATION.level2,
+    paddingHorizontal: SPACING.xs + 2,
+    ...ELEVATION.level3,
   },
   badgeText: {
     ...TYPOGRAPHY.labelSmall,

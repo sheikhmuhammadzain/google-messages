@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Alert, Animated } from 'react-native';
 import { Text, IconButton } from 'react-native-paper';
 import { Message } from '../types';
 import { formatChatTime } from '../utils/dateUtils';
@@ -18,6 +18,34 @@ export default function MessageBubble({ message, showTimestamp = true, onRetry, 
   const isFailed = message.status === 'failed';
   const DELIVERY_WARN_MS = 5 * 60 * 1000; // 5 minutes
   const isDeliveryDelayed = isSent && message.status === 'sent' && typeof currentTime === 'number' && (currentTime - message.timestamp) > DELIVERY_WARN_MS;
+  
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(isSent ? 20 : -20)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  
+  useEffect(() => {
+    // Smooth entrance animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   const handleLongPress = () => {
     if (onDelete) {
@@ -41,13 +69,26 @@ export default function MessageBubble({ message, showTimestamp = true, onRetry, 
   };
 
   return (
-    <TouchableOpacity 
-      style={[styles.container, isSent ? styles.sentContainer : styles.receivedContainer]}
-      onLongPress={handleLongPress}
-      activeOpacity={0.8}
-      delayLongPress={500}
+    <Animated.View
+      style={[
+        styles.container,
+        isSent ? styles.sentContainer : styles.receivedContainer,
+        {
+          opacity: fadeAnim,
+          transform: [
+            { translateX: slideAnim },
+            { scale: scaleAnim },
+          ],
+        },
+      ]}
     >
-      <View style={[styles.bubble, isSent ? styles.sentBubble : styles.receivedBubble, isFailed && styles.failedBubble]}>
+      <TouchableOpacity 
+        style={{ width: '100%', alignItems: isSent ? 'flex-end' : 'flex-start' }}
+        onLongPress={handleLongPress}
+        activeOpacity={0.8}
+        delayLongPress={500}
+      >
+        <View style={[styles.bubble, isSent ? styles.sentBubble : styles.receivedBubble, isFailed && styles.failedBubble]}>
         <Text style={[styles.messageText, isSent ? styles.sentText : styles.receivedText]}>
           {message.body}
         </Text>
@@ -77,15 +118,15 @@ export default function MessageBubble({ message, showTimestamp = true, onRetry, 
           )}
         </View>
       </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flexDirection: 'row',
     width: '100%',
-    marginVertical: 2,
+    marginVertical: 3,
     paddingHorizontal: 8,
   },
   sentContainer: {
@@ -96,22 +137,22 @@ const styles = StyleSheet.create({
   },
   bubble: {
     maxWidth: '80%',
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    elevation: 0.5,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
   },
   sentBubble: {
     backgroundColor: COLORS.sentBubble,
-    borderBottomRightRadius: 2,
+    borderBottomRightRadius: 4,
   },
   receivedBubble: {
     backgroundColor: COLORS.receivedBubble,
-    borderBottomLeftRadius: 2,
+    borderBottomLeftRadius: 4,
   },
   failedBubble: {
     backgroundColor: '#D32F2F',
@@ -128,9 +169,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   messageText: {
-    fontSize: 15,
-    lineHeight: 20,
-    letterSpacing: 0.1,
+    fontSize: 16,
+    lineHeight: 22,
+    letterSpacing: 0.15,
   },
   sentText: {
     color: COLORS.sentText,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Keyboard, Platform, DeviceEventEmitter, Alert } from 'react-native';
+import { View, StyleSheet, Keyboard, Platform, DeviceEventEmitter, Alert, Animated } from 'react-native';
 import { TextInput, IconButton, ActivityIndicator } from 'react-native-paper';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +37,11 @@ export default function ChatScreen() {
   const [nowTick, setNowTick] = useState(Date.now());
   const insets = useSafeAreaInsets();
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  
+  // Animation values
+  const [sendButtonScale] = useState(new Animated.Value(1));
+  const [inputFocused, setInputFocused] = useState(false);
+  
   // Extra padding to keep the input clearly above the keyboard on Android
   const KEYBOARD_EXTRA_OFFSET = 32;
 
@@ -290,6 +295,21 @@ export default function ChatScreen() {
 
   const handleSendMessage = async () => {
     if (!messageText.trim() || isSending) return;
+    
+    // Animate send button
+    Animated.sequence([
+      Animated.timing(sendButtonScale, {
+        toValue: 0.85,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.spring(sendButtonScale, {
+        toValue: 1,
+        friction: 3,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
 
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const tempMessage: Message = {
@@ -608,10 +628,13 @@ export default function ChatScreen() {
               compact
             />
           )}
-          <View style={styles.inputWrapper}>
+          <View style={[
+            styles.inputWrapper,
+            inputFocused && styles.inputWrapperFocused
+          ]}>
             <TextInput
               style={styles.input}
-              placeholder="Text message"
+              placeholder="Message"
               placeholderTextColor={COLORS.textTertiary}
               value={messageText}
               onChangeText={setMessageText}
@@ -624,21 +647,26 @@ export default function ChatScreen() {
               selectionColor={COLORS.primaryLight}
               textColor={COLORS.textPrimary}
               onFocus={() => {
+                setInputFocused(true);
                 // Scroll to bottom when input is focused
                 setTimeout(() => {
                   flatListRef.current?.scrollToEnd?.({ animated: true });
                 }, 300);
               }}
+              onBlur={() => setInputFocused(false)}
             />
           </View>
-          <IconButton
-            icon="send"
-            size={24}
-            iconColor={messageText.trim() ? COLORS.primary : COLORS.textDisabled}
-            disabled={!messageText.trim() || isSending}
-            onPress={handleSendMessage}
-            style={messageText.trim() && styles.sendButtonActive}
-          />
+          <Animated.View style={{ transform: [{ scale: sendButtonScale }] }}>
+            <IconButton
+              icon="send"
+              size={24}
+              iconColor={messageText.trim() ? COLORS.background : COLORS.textDisabled}
+              disabled={!messageText.trim() || isSending}
+              onPress={handleSendMessage}
+              style={[styles.sendButton, messageText.trim() ? styles.sendButtonActive : styles.sendButtonDisabled]}
+              rippleColor={COLORS.primaryLight}
+            />
+          </Animated.View>
         </View>
       </View>
       
@@ -665,22 +693,29 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.backgroundGray,
   },
   messagesList: {
-    paddingVertical: 12,
-    paddingHorizontal: 4,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    flexGrow: 1,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 12,
     backgroundColor: COLORS.background,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
     // Ensure input container stays above keyboard
     zIndex: 1000,
   },
@@ -692,25 +727,66 @@ const styles = StyleSheet.create({
     minHeight: 48,
     maxHeight: 120,
     justifyContent: 'center',
-    // Ensure input wrapper is clearly visible
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
+  },
+  inputWrapperFocused: {
+    backgroundColor: COLORS.background,
+    borderColor: COLORS.primary,
+    ...Platform.select({
+      ios: {
+        shadowColor: COLORS.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   input: {
     backgroundColor: 'transparent',
-    fontSize: 15,
+    fontSize: 16,
+    lineHeight: 20,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
+  },
+  sendButton: {
+    borderRadius: 24,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    margin: 0,
   },
   sendButtonActive: {
-    backgroundColor: COLORS.primaryLight,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    backgroundColor: COLORS.primary,
+    ...Platform.select({
+      ios: {
+        shadowColor: COLORS.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
+  },
+  sendButtonDisabled: {
+    backgroundColor: COLORS.surfaceVariant,
+    elevation: 0,
   },
 });

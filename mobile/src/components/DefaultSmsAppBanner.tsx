@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { Text, Button, Card, IconButton } from 'react-native-paper';
 import { COLORS } from '../config/constants';
 
@@ -14,101 +14,118 @@ export default function DefaultSmsAppBanner({
   onSetDefault,
   onDismiss,
   isLoading = false,
-  style
+  style,
 }: DefaultSmsAppBannerProps) {
   return (
-    <Card style={[styles.container, style]} mode="outlined">
+    <Card style={[styles.container, style]} mode="elevated">
       <View style={styles.content}>
         <View style={styles.iconContainer}>
-          <Text style={styles.icon}>⚠️</Text>
+          <IconButton
+            icon="alert-circle-outline"
+            size={22}
+            iconColor={stylesVars.icon}
+            style={{ margin: 0 }}
+            disabled
+          />
         </View>
-        
+
         <View style={styles.textContainer}>
-          <Text style={styles.title}>Set as Default Messaging App</Text>
+          <Text style={styles.title}>Set as default SMS app</Text>
           <Text style={styles.message}>
-            To receive messages and sync with the web, set this app as your default messaging app.
+            For full functionality (send/receive and web sync), set this app as your default messaging app.
           </Text>
         </View>
 
         {onDismiss && (
           <IconButton
             icon="close"
-            size={20}
-            iconColor={COLORS.textSecondary}
+            size={18}
+            iconColor={stylesVars.close}
             onPress={onDismiss}
             style={styles.closeButton}
+            accessibilityLabel="Dismiss"
           />
         )}
       </View>
-      
+
       <View style={styles.actions}>
         <Button
-          mode="contained"
+          mode="contained-tonal"
           onPress={onSetDefault}
           loading={isLoading}
           disabled={isLoading}
           style={styles.actionButton}
           contentStyle={styles.buttonContent}
+          uppercase={false}
         >
-          {isLoading ? 'Setting up...' : 'Set as Default'}
+          {isLoading ? 'Opening settings…' : 'Set as default'}
         </Button>
       </View>
     </Card>
   );
 }
 
+const stylesVars = {
+  bg: '#FFF7DA',
+  border: '#FFE7A0',
+  text: '#6F5A00',
+  icon: '#B88700',
+  close: '#8A7B4F',
+};
+
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFF3CD',
-    borderColor: '#FFE69C',
-    marginHorizontal: 16,
-    marginVertical: 8,
-    elevation: 2,
+    backgroundColor: stylesVars.bg,
+    borderColor: stylesVars.border,
+    borderRadius: 16,
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 4,
+    elevation: 1,
   },
   content: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    padding: 16,
-    paddingBottom: 8,
+    paddingHorizontal: 14,
+    paddingTop: 12,
   },
   iconContainer: {
-    marginRight: 12,
+    marginRight: 8,
     marginTop: 2,
-  },
-  icon: {
-    fontSize: 20,
   },
   textContainer: {
     flex: 1,
     marginRight: 8,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#856404',
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '700',
+    color: stylesVars.text,
+    marginBottom: 2,
+    letterSpacing: 0.15,
   },
   message: {
-    fontSize: 14,
-    color: '#856404',
-    lineHeight: 20,
+    fontSize: 13,
+    color: stylesVars.text,
+    lineHeight: 18,
+    opacity: 0.9,
   },
   closeButton: {
-    margin: -8,
-    marginTop: -4,
+    margin: -6,
   },
   actions: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingHorizontal: 14,
     paddingTop: 8,
+    paddingBottom: 12,
     alignItems: 'flex-start',
   },
   actionButton: {
-    backgroundColor: '#FFC107',
-    elevation: 0,
+    borderRadius: 22,
+    backgroundColor: '#FFD54F',
   },
   buttonContent: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 14,
+    height: 40,
   },
 });
 

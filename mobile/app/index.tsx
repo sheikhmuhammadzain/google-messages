@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, FlatList, StyleSheet, RefreshControl, TouchableOpacity, AppState } from 'react-native';
+import { View, FlatList, StyleSheet, RefreshControl, TouchableOpacity, AppState, Animated, Platform } from 'react-native';
 import { FAB, Searchbar, Text, ActivityIndicator, IconButton } from 'react-native-paper';
 import { useRouter, useFocusEffect } from 'expo-router';
 import ConversationItem from '../src/components/ConversationItem';
@@ -22,6 +22,10 @@ export default function InboxScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  
+  // Animation values
+  const [fabScale] = useState(new Animated.Value(1));
+  const [searchBarFocused, setSearchBarFocused] = useState(false);
   
   const permissions = usePermissions();
 
@@ -245,6 +249,21 @@ export default function InboxScreen() {
   };
 
   const handleNewMessage = () => {
+    // Animate FAB press
+    Animated.sequence([
+      Animated.timing(fabScale, {
+        toValue: 0.9,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.spring(fabScale, {
+        toValue: 1,
+        friction: 3,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+    
     router.push('/compose');
   };
 
@@ -293,10 +312,16 @@ export default function InboxScreen() {
           placeholder="Search conversations"
           onChangeText={setSearchQuery}
           value={searchQuery}
-          style={styles.searchbar}
-          iconColor={COLORS.textSecondary}
+          onFocus={() => setSearchBarFocused(true)}
+          onBlur={() => setSearchBarFocused(false)}
+          style={[
+            styles.searchbar,
+            searchBarFocused && styles.searchbarFocused
+          ]}
+          iconColor={searchBarFocused ? COLORS.primary : COLORS.textSecondary}
           inputStyle={styles.searchInput}
-          elevation={0}
+          elevation={searchBarFocused ? 3 : 0}
+          mode="bar"
         />
         <IconButton
           icon="refresh"
@@ -304,6 +329,7 @@ export default function InboxScreen() {
           iconColor={COLORS.primary}
           onPress={handleRefresh}
           style={styles.refreshButton}
+          rippleColor={COLORS.primaryLight}
         />
         <IconButton
           icon="sync"
@@ -311,6 +337,7 @@ export default function InboxScreen() {
           iconColor={COLORS.accent}
           onPress={handleSyncWithGoogleMessages}
           style={styles.syncButton}
+          rippleColor={COLORS.accentLight}
         />
       </View>
       
@@ -330,13 +357,17 @@ export default function InboxScreen() {
         }
       />
 
-      <FAB
-        icon="plus"
-        style={styles.fab}
-        onPress={handleNewMessage}
-        color={COLORS.background}
-        customSize={56}
-      />
+      <Animated.View style={[styles.fabContainer, { transform: [{ scale: fabScale }] }]}>
+        <FAB
+          icon="message-plus-outline"
+          style={styles.fab}
+          onPress={handleNewMessage}
+          color={COLORS.background}
+          customSize={56}
+          mode="elevated"
+          rippleColor={COLORS.primaryLight}
+        />
+      </Animated.View>
     </View>
   );
 }
@@ -348,13 +379,24 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     backgroundColor: COLORS.background,
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: COLORS.divider,
     flexDirection: 'row',
     alignItems: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
   searchbar: {
     backgroundColor: COLORS.surfaceVariant,
@@ -362,20 +404,33 @@ const styles = StyleSheet.create({
     elevation: 0,
     flex: 1,
     marginRight: 8,
+    height: 48,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  searchbarFocused: {
+    backgroundColor: COLORS.background,
+    borderColor: COLORS.primary,
+    elevation: 3,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
   },
   refreshButton: {
     backgroundColor: COLORS.surfaceVariant,
     borderRadius: 20,
-    elevation: 1,
+    margin: 0,
   },
   syncButton: {
     backgroundColor: COLORS.surfaceVariant,
     borderRadius: 20,
-    elevation: 1,
+    margin: 0,
   },
   searchInput: {
     fontSize: 15,
     color: COLORS.textPrimary,
+    minHeight: 48,
   },
   loadingContainer: {
     flex: 1,
@@ -412,11 +467,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  fab: {
+  fabContainer: {
     position: 'absolute',
-    right: 20,
-    bottom: 20,
+    right: 16,
+    bottom: 16,
+  },
+  fab: {
     backgroundColor: COLORS.primary,
-    elevation: 6,
+    borderRadius: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: COLORS.primary,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
   },
 });
