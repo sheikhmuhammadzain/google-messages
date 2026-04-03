@@ -1,3 +1,5 @@
+.env.local
+.env
 # Dependencies
 node_modules/
 .pnp/
