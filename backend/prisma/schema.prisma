@@ -1,0 +1,80 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Device {
+  id                  String    @id @default(uuid())
+  deviceId            String    @unique
+  deviceName          String
+  deviceModel         String
+  pairingToken        String?
+  pairingTokenExpiry  DateTime?
+  connectedAt         DateTime  @default(now())
+  lastSeen            DateTime  @default(now())
+  sessions            Session[]
+  
+  @@index([deviceId])
+  @@index([pairingToken])
+  @@map("devices")
+}
+
+model Session {
+  id             String   @id @default(uuid())
+  deviceId       String
+  sessionToken   String   @unique
+  connectedAt    DateTime @default(now())
+  lastSeen       DateTime @default(now())
+  expiresAt      DateTime
+  
+  device         Device   @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+  
+  @@index([deviceId])
+  @@index([sessionToken])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// Optional: Store message history (for backup/analytics)
+model Message {
+  id              String   @id @default(uuid())
+  deviceId        String
+  conversationId  String
+  phoneNumber     String
+  body            String
+  timestamp       DateTime
+  type            String   // 'sent' or 'received'
+  status          String?  // 'sending', 'sent', 'delivered', 'failed'
+  read            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  
+  @@index([deviceId])
+  @@index([conversationId])
+  @@index([phoneNumber])
+  @@index([timestamp])
+  @@map("messages")
+}
+
+// Optional: Store conversations
+model Conversation {
+  id              String   @id @default(uuid())
+  deviceId        String
+  phoneNumber     String
+  contactName     String?
+  lastMessage     String
+  lastMessageTime DateTime
+  unreadCount     Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([deviceId, phoneNumber])
+  @@index([deviceId])
+  @@index([lastMessageTime])
+  @@map("conversations")
+}
